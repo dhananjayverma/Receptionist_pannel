@@ -1,8 +1,12 @@
+import { fileURLToPath } from "url";
+import { dirname } from "path";
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
+
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   turbopack: {
-    // Ensure Turbopack uses this folder as the workspace root
-    root: "./",
+    root: __dirname,
   },
 };
 
