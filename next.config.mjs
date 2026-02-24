@@ -1,12 +1,18 @@
-import { fileURLToPath } from "url";
-import { dirname } from "path";
-
-const __dirname = dirname(fileURLToPath(import.meta.url));
-
 /** @type {import('next').NextConfig} */
 const nextConfig = {
-  turbopack: {
-    root: __dirname,
+  async redirects() {
+    return [
+      { source: "/dashboard", destination: "/reception/dashboard", permanent: false },
+      { source: "/patients", destination: "/reception/patients", permanent: false },
+      { source: "/appointments", destination: "/reception/appointments", permanent: false },
+      { source: "/billing", destination: "/reception/billing", permanent: false },
+      { source: "/history", destination: "/reception/history", permanent: false },
+      { source: "/receipts", destination: "/reception/receipts", permanent: false },
+      { source: "/reports", destination: "/reception/reports", permanent: false },
+      { source: "/payments", destination: "/reception/payments", permanent: false },
+      { source: "/invoices", destination: "/reception/invoices", permanent: false },
+      { source: "/prescriptions", destination: "/reception/prescriptions", permanent: false },
+    ];
   },
 };
 
