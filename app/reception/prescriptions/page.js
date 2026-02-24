@@ -8,6 +8,7 @@ export default function PrescriptionsPage() {
   const [prescriptions, setPrescriptions] = useState([]);
   const [patients, setPatients] = useState([]);
   const [doctors, setDoctors] = useState([]);
+  const [appointments, setAppointments] = useState([]);
   const [pharmacies, setPharmacies] = useState([]);
   const [loading, setLoading] = useState(true);
   const [message, setMessage] = useState({ type: "", text: "" });
@@ -21,32 +22,136 @@ export default function PrescriptionsPage() {
   const [sendToPharmacyModal, setSendToPharmacyModal] = useState(null);
   const [sendingToPharmacy, setSendingToPharmacy] = useState(false);
   const [successModal, setSuccessModal] = useState({ open: false, title: "", message: "" });
+  const [patientNameCache, setPatientNameCache] = useState({});
+  const [doctorNameCache, setDoctorNameCache] = useState({});
 
   useEffect(() => {
     fetchData();
   }, []);
 
+  // Pre-fill name cache from populated prescription data and fetch missing patient/doctor names by ID
+  useEffect(() => {
+    if (!prescriptions.length) return;
+    const headers = getAuthHeaders();
+    const norm = (v) => {
+      if (v == null) return "";
+      if (typeof v === "object") {
+        if (v.$oid) return String(v.$oid);
+        const id = v._id || v.id;
+        return id != null ? String(id) : "";
+      }
+      return String(v);
+    };
+    const looksLikeIdStr = (s) => typeof s === "string" && /^[a-f0-9]{24}$/i.test(String(s).trim());
+    const nameFromUser = (u) => {
+      if (!u) return null;
+      const name = u.name || u.patientName || u.doctorName || u.fullName || u.profile?.name || u.profile?.fullName || (u.firstName && u.lastName ? `${u.firstName} ${u.lastName}`.trim() : null) || (u.firstName || u.lastName) || null;
+      return name && !looksLikeIdStr(name) ? name : null;
+    };
+    // Pre-fill cache from prescriptions that already have populated patient/doctor with names
+    const patientCacheUpdates = {};
+    const doctorCacheUpdates = {};
+    prescriptions.forEach((p) => {
+      const patient = p.patient;
+      if (patient && typeof patient === "object") {
+        const id = norm(patient);
+        const name = nameFromUser(patient) || (patient.firstName && (patient.lastName || patient.firstName) ? [patient.firstName, patient.lastName].filter(Boolean).join(" ").trim() : null);
+        if (id && name) patientCacheUpdates[id] = name;
+      }
+      const doctor = p.doctor;
+      if (doctor && typeof doctor === "object") {
+        const id = norm(doctor);
+        const name = nameFromUser(doctor) || (doctor.firstName && (doctor.lastName || doctor.firstName) ? [doctor.firstName, doctor.lastName].filter(Boolean).join(" ").trim() : null);
+        if (id && name) doctorCacheUpdates[id] = name;
+      }
+    });
+    if (Object.keys(patientCacheUpdates).length) setPatientNameCache((c) => ({ ...c, ...patientCacheUpdates }));
+    if (Object.keys(doctorCacheUpdates).length) setDoctorNameCache((c) => ({ ...c, ...doctorCacheUpdates }));
+    const getPatientId = (p) => norm(p.patientId || p.patient || p.userId || p.patient_id || p.user);
+    const missingPatientIds = [...new Set(prescriptions.map((p) => getPatientId(p)).filter(Boolean))];
+    const missingDoctorIds = [...new Set(prescriptions.map((p) => norm(p.doctorId || p.doctor)).filter(Boolean))];
+    const patIdSet = new Set(patients.map((x) => norm(x._id || x.id)));
+    const docIdSet = new Set(doctors.map((x) => norm(x._id || x.id)));
+    missingPatientIds.forEach((id) => {
+      if (patIdSet.has(id) || patientNameCache[id]) return;
+      fetch(buildApiUrl(`/api/users/${id}`), { headers })
+        .then((r) => (r.ok ? r.json() : null))
+        .then((raw) => {
+          const user = raw?.data ?? raw?.user ?? raw?.result ?? raw;
+          const name = nameFromUser(user) || nameFromUser(user?.profile) || nameFromUser(raw?.data?.profile);
+          if (name) {
+            setPatientNameCache((c) => ({ ...c, [id]: name }));
+            return null;
+          }
+          return fetch(buildApiUrl(`/api/patients/${id}`), { headers });
+        })
+        .then((r) => (r && r.ok ? r.json() : null))
+        .then((raw) => {
+          if (!raw) return;
+          const user = raw?.patient ?? raw?.data ?? raw?.user ?? raw?.result ?? raw;
+          const name = nameFromUser(user) || nameFromUser(user?.profile) || nameFromUser(raw?.data?.profile);
+          if (name) setPatientNameCache((c) => ({ ...c, [id]: name }));
+        })
+        .catch(() => {});
+    });
+    missingDoctorIds.forEach((id) => {
+      if (docIdSet.has(id) || doctorNameCache[id]) return;
+      fetch(buildApiUrl(`/api/users/${id}`), { headers })
+        .then((r) => (r.ok ? r.json() : null))
+        .then((raw) => {
+          const user = raw?.data ?? raw?.user ?? raw?.result ?? raw;
+          const name = nameFromUser(user) || nameFromUser(user?.profile) || nameFromUser(raw?.data?.profile);
+          if (name) setDoctorNameCache((c) => ({ ...c, [id]: name }));
+        })
+        .catch(() => {});
+    });
+  }, [prescriptions, patients, doctors, patientNameCache, doctorNameCache]);
+
+  function normId(v) {
+    if (v == null) return "";
+    if (typeof v === "object") {
+      if (v.$oid) return String(v.$oid);
+      const id = v._id || v.id;
+      return id != null ? String(id) : "";
+    }
+    return String(v);
+  }
+
   async function fetchData() {
     setLoading(true);
     try {
       const headers = getAuthHeaders();
-      const [preRes, patRes, docRes, pharmRes] = await Promise.all([
-        fetch(buildApiUrl("/api/prescriptions"), { headers }),
+      const [preRes, patRes, docRes, aptRes, pharmRes] = await Promise.all([
+        fetch(buildApiUrl("/api/prescriptions?populate=patient,doctor"), { headers }),
         fetch(buildApiUrl("/api/users?role=PATIENT"), { headers }),
         fetch(buildApiUrl("/api/users?role=DOCTOR"), { headers }),
+        fetch(buildApiUrl("/api/appointments"), { headers }).catch(() => ({ ok: false })),
         fetch(buildApiUrl(PHARMACIES_PATH), { headers }).catch(() => ({ ok: false })),
       ]);
       const preRaw = preRes.ok ? await preRes.json() : [];
       const patRaw = patRes.ok ? await patRes.json() : [];
       const docRaw = docRes.ok ? await docRes.json() : [];
+      const aptRaw = aptRes.ok ? await aptRes.json() : [];
       const pharmRaw = pharmRes.ok ? await pharmRes.json() : [];
-      const preList = Array.isArray(preRaw) ? preRaw : Array.isArray(preRaw?.data) ? preRaw.data : Array.isArray(preRaw?.prescriptions) ? preRaw.prescriptions : [];
-      const patList = Array.isArray(patRaw) ? patRaw : Array.isArray(patRaw?.data) ? patRaw.data : Array.isArray(patRaw?.users) ? patRaw.users : [];
-      const docList = Array.isArray(docRaw) ? docRaw : Array.isArray(docRaw?.data) ? docRaw.data : Array.isArray(docRaw?.users) ? docRaw.users : [];
-      const pharmList = Array.isArray(pharmRaw) ? pharmRaw : Array.isArray(pharmRaw?.data) ? pharmRaw.data : [];
+      const toList = (raw, keys = ["data", "users", "prescriptions", "list"]) => {
+        if (Array.isArray(raw)) return raw;
+        for (const k of keys) {
+          if (Array.isArray(raw?.[k])) return raw[k];
+        }
+        if (raw?.data && Array.isArray(raw.data?.users)) return raw.data.users;
+        if (raw?.data && Array.isArray(raw.data?.list)) return raw.data.list;
+        if (raw?.data && Array.isArray(raw.data?.prescriptions)) return raw.data.prescriptions;
+        return [];
+      };
+      const preList = toList(preRaw, ["data", "prescriptions", "list"]);
+      const patList = Array.isArray(patRaw) ? patRaw : Array.isArray(patRaw?.data) ? patRaw.data : Array.isArray(patRaw?.users) ? patRaw.users : Array.isArray(patRaw?.data?.users) ? patRaw.data.users : [];
+      const docList = Array.isArray(docRaw) ? docRaw : Array.isArray(docRaw?.data) ? docRaw.data : Array.isArray(docRaw?.users) ? docRaw.users : Array.isArray(docRaw?.data?.users) ? docRaw.data.users : toList(docRaw, ["data", "users", "list"]);
+      const aptList = Array.isArray(aptRaw) ? aptRaw : Array.isArray(aptRaw?.data) ? aptRaw.data : Array.isArray(aptRaw?.appointments) ? aptRaw.appointments : [];
+      const pharmList = toList(pharmRaw, ["data", "list"]);
       setPrescriptions(preList);
       setPatients(patList);
       setDoctors(docList);
+      setAppointments(aptList);
       setPharmacies(pharmList);
     } catch (e) {
       setMessage({ type: "error", text: "Failed to load data" });
@@ -62,10 +167,17 @@ export default function PrescriptionsPage() {
       const params = new URLSearchParams();
       if (filter.patientId) params.set("patientId", filter.patientId);
       if (filter.doctorId) params.set("doctorId", filter.doctorId);
+      params.set("populate", "patient,doctor");
       const url = buildApiUrl("/api/prescriptions") + (params.toString() ? `?${params}` : "");
       const res = await fetch(url, { headers: getAuthHeaders() });
       const raw = res.ok ? await res.json() : [];
-      let data = Array.isArray(raw) ? raw : Array.isArray(raw?.data) ? raw.data : Array.isArray(raw?.prescriptions) ? raw.prescriptions : [];
+      const toList = (r, keys = ["data", "prescriptions", "list"]) => {
+        if (Array.isArray(r)) return r;
+        for (const k of keys) if (Array.isArray(r?.[k])) return r[k];
+        if (r?.data && Array.isArray(r.data?.list)) return r.data.list;
+        return [];
+      };
+      let data = toList(raw, ["data", "prescriptions", "list"]);
       if (filter.fromDate || filter.toDate) {
         data = data.filter((p) => {
           const d = (p.createdAt || p.date || "").toString().split("T")[0];
@@ -82,18 +194,94 @@ export default function PrescriptionsPage() {
     }
   }
 
-  const getPatientName = (id) => {
-    if (!id) return "—";
-    const p = patients.find((x) => (x._id || x.id) === id);
-    return p?.name || p?.patientName || "—";
+  const looksLikeId = (s) => typeof s === "string" && /^[a-f0-9]{24}$/i.test(String(s).trim());
+
+  const nameFromObj = (o) => {
+    if (!o) return null;
+    if (Array.isArray(o) && o[0]) return nameFromObj(o[0]);
+    if (typeof o !== "object") return null;
+    const name = o.name || o.patientName || o.doctorName || o.fullName || o.user?.name || o.profile?.name || o.profile?.fullName || [o.firstName, o.lastName].filter(Boolean).join(" ").trim() || null;
+    if (name && !looksLikeId(name)) return name;
+    return null;
   };
-  const getDoctorName = (id) => {
+
+  /** Display name for user/patient in lists - never return raw ID. */
+  const getPatientDisplayName = (idOrObj) => {
+    if (idOrObj == null) return "—";
+    const fromObj = nameFromObj(idOrObj);
+    if (fromObj) return fromObj;
+    const id = normId(idOrObj);
     if (!id) return "—";
-    const d = doctors.find((x) => (x._id || x.id) === id);
-    return d?.name || d?.doctorName || "—";
+    if (patientNameCache[id]) return patientNameCache[id];
+    const p = patients.find((x) => {
+      const xid = normId(x._id || x.id);
+      return xid === id || (xid && id && xid.length > 6 && (xid === id || xid.slice(-8) === id.slice(-8)));
+    });
+    const n = p?.name || p?.patientName || p?.fullName || (p?.firstName && (p?.lastName || p?.firstName) ? [p.firstName, p.lastName].filter(Boolean).join(" ").trim() : null);
+    if (n && !looksLikeId(n)) return n;
+    return "—";
   };
-  const getPatient = (id) => patients.find((p) => (p._id || p.id) === id);
-  const getDoctor = (id) => doctors.find((d) => (d._id || d.id) === id);
+
+  /** Display name for doctor - never return raw ID. */
+  const getDoctorDisplayName = (idOrObj) => {
+    if (idOrObj == null) return "—";
+    const fromObj = nameFromObj(idOrObj);
+    if (fromObj) return fromObj;
+    const id = normId(idOrObj);
+    if (!id) return "—";
+    if (doctorNameCache[id]) return doctorNameCache[id];
+    const d = doctors.find((x) => {
+      const xid = normId(x._id || x.id);
+      return xid === id || (xid && id && xid.length > 6 && (xid === id || xid.slice(-8) === id.slice(-8)));
+    });
+    const n = d?.name || d?.doctorName || d?.fullName || (d?.firstName && (d?.lastName || d?.firstName) ? [d.firstName, d.lastName].filter(Boolean).join(" ").trim() : null);
+    if (n && !looksLikeId(n)) return n;
+    return "—";
+  };
+
+  const getPatientName = getPatientDisplayName;
+  const getDoctorName = getDoctorDisplayName;
+  /** Same lookup as appointments page: find patient by id (strict or normalized). */
+  const getPatient = (idOrObj) => {
+    if (idOrObj == null) return null;
+    const id = normId(idOrObj);
+    if (!id) return typeof idOrObj === "object" && (idOrObj.name || idOrObj.patientName) ? idOrObj : null;
+    const byStrict = patients.find((p) => (p._id || p.id) === id || (p._id || p.id) === idOrObj);
+    if (byStrict) return byStrict;
+    return patients.find((p) => normId(p._id || p.id) === id) || null;
+  };
+  /** Same pattern as getPatient: find doctor by id (strict or normalized). */
+  const getDoctor = (idOrObj) => {
+    if (idOrObj == null) return null;
+    const id = normId(idOrObj);
+    if (!id) return typeof idOrObj === "object" && (idOrObj.name || idOrObj.doctorName) ? idOrObj : null;
+    const byStrict = doctors.find((d) => (d._id || d.id) === id || (d._id || d.id) === idOrObj);
+    if (byStrict) return byStrict;
+    return doctors.find((d) => normId(d._id || d.id) === id) || null;
+  };
+
+  /** Get patient name from appointments by appointmentId (prescription has appointmentId). */
+  const getPatientNameFromAppointments = (patientIdOrPrescription) => {
+    if (!appointments.length) return null;
+    const isObj = patientIdOrPrescription != null && typeof patientIdOrPrescription === "object";
+    const appointmentId = isObj && patientIdOrPrescription.appointmentId != null ? normId(patientIdOrPrescription.appointmentId) : null;
+    const patientId = isObj ? normId(patientIdOrPrescription.patientId || patientIdOrPrescription.patient || patientIdOrPrescription.userId) : normId(patientIdOrPrescription);
+    if (appointmentId) {
+      const apt = appointments.find((a) => normId(a._id || a.id) === appointmentId);
+      return apt ? (apt.patientName || (apt.patient && nameFromObj(apt.patient)) || null) : null;
+    }
+    if (!patientId) return null;
+    const byPatientId = appointments.find((a) => normId(a.patientId) === patientId || String(a.patientId) === patientId);
+    return byPatientId ? (byPatientId.patientName || (byPatientId.patient && nameFromObj(byPatientId.patient)) || null) : null;
+  };
+
+  /** Resolve patient name from appointments by patientId (used when prescription has same patientId as appointment). */
+  const getPatientNameByPatientIdFromAppointments = (patientId) => {
+    if (!appointments.length || !patientId) return null;
+    const id = normId(patientId);
+    const apt = appointments.find((a) => normId(a.patientId) === id || (a.patientId || "") === id || (typeof a.patientId === "object" && normId(a.patientId) === id));
+    return apt ? (apt.patientName || (apt.patient && nameFromObj(apt.patient)) || null) : null;
+  };
 
   async function sendPrescriptionToPharmacy(prescriptionId, pharmacyId) {
     const prescription = prescriptions.find((p) => (p._id || p.id) === prescriptionId);
@@ -166,19 +354,25 @@ export default function PrescriptionsPage() {
         <div className="flex flex-wrap gap-4 items-end">
           <div>
             <label className="block text-xs font-medium text-zinc-500 dark:text-zinc-400 mb-1">Patient</label>
-            <select value={filter.patientId} onChange={(e) => setFilter((f) => ({ ...f, patientId: e.target.value }))} className="rounded-lg border border-zinc-300 dark:border-zinc-600 bg-white dark:bg-zinc-800 px-3 py-2 text-sm text-zinc-900 dark:text-zinc-50 min-w-[180px]">
+            <select value={filter.patientId} onChange={(e) => setFilter((f) => ({ ...f, patientId: e.target.value }))} className="rounded-lg border border-zinc-300 dark:border-zinc-600 bg-white dark:bg-zinc-800 px-3 py-2 text-sm text-zinc-900 dark:text-zinc-50 min-w-[200px]">
               <option value="">All patients</option>
               {patients.map((p) => (
-                <option key={p._id || p.id} value={p._id || p.id}>{p.name}</option>
+                <option key={normId(p._id || p.id)} value={normId(p._id || p.id)}>
+                  {getPatientDisplayName(p)}
+                  {(p.phone || p.mobile) ? ` · ${p.phone || p.mobile}` : ""}
+                </option>
               ))}
             </select>
           </div>
           <div>
             <label className="block text-xs font-medium text-zinc-500 dark:text-zinc-400 mb-1">Doctor</label>
-            <select value={filter.doctorId} onChange={(e) => setFilter((f) => ({ ...f, doctorId: e.target.value }))} className="rounded-lg border border-zinc-300 dark:border-zinc-600 bg-white dark:bg-zinc-800 px-3 py-2 text-sm text-zinc-900 dark:text-zinc-50 min-w-[180px]">
+            <select value={filter.doctorId} onChange={(e) => setFilter((f) => ({ ...f, doctorId: e.target.value }))} className="rounded-lg border border-zinc-300 dark:border-zinc-600 bg-white dark:bg-zinc-800 px-3 py-2 text-sm text-zinc-900 dark:text-zinc-50 min-w-[200px]">
               <option value="">All doctors</option>
               {doctors.map((d) => (
-                <option key={d._id || d.id} value={d._id || d.id}>Dr. {d.name}</option>
+                <option key={normId(d._id || d.id)} value={normId(d._id || d.id)}>
+                  Dr. {getDoctorDisplayName(d)}
+                  {d.specialization ? ` · ${d.specialization}` : ""}
+                </option>
               ))}
             </select>
           </div>
@@ -200,50 +394,66 @@ export default function PrescriptionsPage() {
       </div>
 
       <div className="rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 shadow-sm overflow-hidden">
-        <div className="p-4 border-b border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-800/50">
-          <h2 className="font-semibold text-zinc-900 dark:text-zinc-50">Prescriptions ({filteredList.length})</h2>
+        <div className="px-5 py-4 border-b border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-800/50">
+          <h2 className="font-semibold text-zinc-900 dark:text-zinc-50 text-lg">Prescriptions</h2>
+          <p className="mt-0.5 text-sm text-zinc-500 dark:text-zinc-400">{filteredList.length} record{filteredList.length !== 1 ? "s" : ""}</p>
         </div>
         <div className="overflow-x-auto">
           {loading ? (
-            <div className="p-8 text-center text-zinc-500">Loading…</div>
+            <div className="py-12 text-center">
+              <p className="text-zinc-500 dark:text-zinc-400">Loading prescriptions…</p>
+            </div>
           ) : filteredList.length === 0 ? (
-            <div className="p-8 text-center text-zinc-500">No prescriptions found. Use filters or ensure backend has prescription data.</div>
+            <div className="py-12 text-center">
+              <p className="text-zinc-500 dark:text-zinc-400">No prescriptions found.</p>
+              <p className="mt-1 text-sm text-zinc-400 dark:text-zinc-500">Try changing filters or ensure the backend has prescription data.</p>
+            </div>
           ) : (
             <table className="min-w-full divide-y divide-zinc-200 dark:divide-zinc-700">
               <thead className="bg-zinc-50 dark:bg-zinc-800/50">
                 <tr>
-                  <th className="px-4 py-3 text-left text-xs font-semibold text-zinc-600 dark:text-zinc-400 uppercase">Date</th>
-                  <th className="px-4 py-3 text-left text-xs font-semibold text-zinc-600 dark:text-zinc-400 uppercase">Patient</th>
-                  <th className="px-4 py-3 text-left text-xs font-semibold text-zinc-600 dark:text-zinc-400 uppercase">Doctor</th>
-                  <th className="px-4 py-3 text-left text-xs font-semibold text-zinc-600 dark:text-zinc-400 uppercase">Items</th>
-                  <th className="px-4 py-3 text-left text-xs font-semibold text-zinc-600 dark:text-zinc-400 uppercase">Pharmacy</th>
-                  <th className="px-4 py-3 text-left text-xs font-semibold text-zinc-600 dark:text-zinc-400 uppercase">Actions</th>
+                  <th className="px-4 py-3.5 text-left text-xs font-semibold text-zinc-600 dark:text-zinc-400 uppercase tracking-wider">Date</th>
+                  <th className="px-4 py-3.5 text-left text-xs font-semibold text-zinc-600 dark:text-zinc-400 uppercase tracking-wider">Patient</th>
+                  <th className="px-4 py-3.5 text-left text-xs font-semibold text-zinc-600 dark:text-zinc-400 uppercase tracking-wider">Doctor</th>
+                  <th className="px-4 py-3.5 text-left text-xs font-semibold text-zinc-600 dark:text-zinc-400 uppercase tracking-wider">Items</th>
+                  <th className="px-4 py-3.5 text-left text-xs font-semibold text-zinc-600 dark:text-zinc-400 uppercase tracking-wider">Pharmacy</th>
+                  <th className="px-4 py-3.5 text-left text-xs font-semibold text-zinc-600 dark:text-zinc-400 uppercase tracking-wider">Actions</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-zinc-200 dark:divide-zinc-700">
                 {filteredList.map((p) => {
-                  const patientName = p.patient?.name || p.patientName || getPatientName(p.patientId);
-                  const doctorName = p.doctor?.name || p.doctorName || getDoctorName(p.doctorId);
+                  const patientRef = p.patientId || p.patient || p.userId || p.patient_id || p.user;
+                  const patientIdStr = normId(patientRef);
+                  const patientFromList = getPatient(patientRef);
+                  const fromAppointments = getPatientNameByPatientIdFromAppointments(patientRef) || getPatientNameFromAppointments(p.appointmentId ? { appointmentId: p.appointmentId } : patientRef);
+                  const fromPatientObj = patientFromList?.name || patientFromList?.patientName || patientFromList?.fullName || (patientFromList?.firstName && (patientFromList?.lastName || patientFromList?.firstName) ? [patientFromList.firstName, patientFromList.lastName].filter(Boolean).join(" ").trim() : null);
+                  let patientName = (p.patientName && !looksLikeId(p.patientName) ? p.patientName : null) || (p.patient_name && !looksLikeId(p.patient_name) ? p.patient_name : null) || nameFromObj(p.patient) || nameFromObj(p.patientId) || nameFromObj(p.user) || fromPatientObj || fromAppointments || patientNameCache[patientIdStr] || getPatientName(patientRef);
+                  let doctorName = nameFromObj(p.doctor) || nameFromObj(p.doctorId) || (p.doctorName && !looksLikeId(p.doctorName) ? p.doctorName : null) || getDoctorName(p.doctorId);
+                  if (patientName && looksLikeId(patientName)) patientName = "—";
+                  if (doctorName && looksLikeId(doctorName)) doctorName = "—";
+                  if (!patientName) patientName = "—";
+                  if (!doctorName) doctorName = "—";
+                  const dateStr = p.createdAt ? new Date(p.createdAt).toLocaleDateString(undefined, { day: "2-digit", month: "short", year: "numeric" }) : (p.date ? new Date(p.date).toLocaleDateString(undefined, { day: "2-digit", month: "short", year: "numeric" }) : "—");
+                  const pharmacyName = p.pharmacyId ? (pharmacies.find((ph) => normId(ph._id || ph.id) === normId(p.pharmacyId))?.name || "Assigned") : "—";
+                  const itemCount = (p.items && p.items.length) || 0;
                   return (
-                  <tr key={p._id || p.id} className="hover:bg-zinc-50 dark:hover:bg-zinc-800/50">
-                    <td className="px-4 py-3 text-sm text-zinc-600 dark:text-zinc-400">
-                      {p.createdAt ? new Date(p.createdAt).toLocaleDateString() : (p.date ? new Date(p.date).toLocaleDateString() : "—")}
-                    </td>
-                    <td className="px-4 py-3 text-sm font-medium text-zinc-900 dark:text-zinc-50">{patientName}</td>
-                    <td className="px-4 py-3 text-sm text-zinc-600 dark:text-zinc-400">Dr. {doctorName}</td>
-                    <td className="px-4 py-3 text-sm text-zinc-600 dark:text-zinc-400">{(p.items && p.items.length) || 0} medicine(s)</td>
-                    <td className="px-4 py-3 text-sm text-zinc-500 dark:text-zinc-400">
-                      {p.pharmacyId ? (pharmacies.find((ph) => (ph._id || ph.id) === p.pharmacyId)?.name || "Assigned") : "—"}
-                    </td>
-                    <td className="px-4 py-3 flex gap-2">
-                      <button type="button" onClick={() => setSelectedPrescription(p)} className="text-sm text-emerald-600 dark:text-emerald-400 hover:underline">
-                        View
-                      </button>
-                      {(!p.pharmacyId || !p.pharmacyId.length) && pharmacies.length > 0 && (
-                        <button type="button" onClick={() => setSendToPharmacyModal(p)} className="text-sm text-blue-600 dark:text-blue-400 hover:underline">
-                          Send to pharmacy
+                  <tr key={p._id || p.id} className="hover:bg-zinc-50 dark:hover:bg-zinc-800/50 transition-colors">
+                    <td className="px-4 py-3.5 text-sm text-zinc-700 dark:text-zinc-300 whitespace-nowrap">{dateStr}</td>
+                    <td className="px-4 py-3.5 text-sm font-medium text-zinc-900 dark:text-zinc-50">{patientName}</td>
+                    <td className="px-4 py-3.5 text-sm text-zinc-700 dark:text-zinc-300">Dr. {doctorName}</td>
+                    <td className="px-4 py-3.5 text-sm text-zinc-600 dark:text-zinc-400">{itemCount} {itemCount === 1 ? "item" : "items"}</td>
+                    <td className="px-4 py-3.5 text-sm text-zinc-600 dark:text-zinc-400">{pharmacyName}</td>
+                    <td className="px-4 py-3.5">
+                      <div className="flex flex-wrap gap-2">
+                        <button type="button" onClick={() => setSelectedPrescription(p)} className="inline-flex items-center rounded-md bg-emerald-600 px-2.5 py-1.5 text-xs font-medium text-white hover:bg-emerald-700">
+                          View
                         </button>
-                      )}
+                        {(!p.pharmacyId || !p.pharmacyId.length) && pharmacies.length > 0 && (
+                          <button type="button" onClick={() => setSendToPharmacyModal(p)} className="inline-flex items-center rounded-md border border-blue-600 px-2.5 py-1.5 text-xs font-medium text-blue-600 dark:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-900/20">
+                            Send to pharmacy
+                          </button>
+                        )}
+                      </div>
                     </td>
                   </tr>
                   );
@@ -256,10 +466,17 @@ export default function PrescriptionsPage() {
 
       {selectedPrescription && (() => {
         const sp = selectedPrescription;
-        const patientName = sp.patient?.name || sp.patientName || getPatientName(sp.patientId);
-        const doctorName = sp.doctor?.name || sp.doctorName || getDoctorName(sp.doctorId);
-        const patient = sp.patient || getPatient(sp.patientId);
-        const doctor = sp.doctor || getDoctor(sp.doctorId);
+        const patientRef = sp.patientId || sp.patient || sp.userId || sp.patient_id || sp.user;
+        const patientFromList = getPatient(patientRef);
+        const doctorFromList = getDoctor(sp.doctorId || sp.doctor);
+        const fromAppointmentsModal = getPatientNameByPatientIdFromAppointments(patientRef) || (sp.appointmentId ? getPatientNameFromAppointments({ appointmentId: sp.appointmentId }) : null);
+        const fromPatientObjModal = patientFromList?.name || patientFromList?.patientName || patientFromList?.fullName || (patientFromList?.firstName && (patientFromList?.lastName || patientFromList?.firstName) ? [patientFromList.firstName, patientFromList.lastName].filter(Boolean).join(" ").trim() : null);
+        let patientName = (sp.patientName && !looksLikeId(sp.patientName) ? sp.patientName : null) || (sp.patient_name && !looksLikeId(sp.patient_name) ? sp.patient_name : null) || nameFromObj(sp.patient) || nameFromObj(sp.user) || fromPatientObjModal || fromAppointmentsModal || patientNameCache[normId(patientRef)] || getPatientName(patientRef) || "—";
+        let doctorName = nameFromObj(sp.doctor) || (sp.doctorName && !looksLikeId(sp.doctorName) ? sp.doctorName : null) || (doctorFromList?.name || doctorFromList?.doctorName || doctorFromList?.fullName || (doctorFromList?.firstName && (doctorFromList?.lastName || doctorFromList?.firstName) ? [doctorFromList.firstName, doctorFromList.lastName].filter(Boolean).join(" ").trim() : null)) || getDoctorName(sp.doctorId) || "—";
+        if (patientName && looksLikeId(patientName)) patientName = "—";
+        if (doctorName && looksLikeId(doctorName)) doctorName = "—";
+        const patient = sp.patient || patientFromList;
+        const doctor = sp.doctor || doctorFromList;
         return (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50" onClick={() => setSelectedPrescription(null)}>
           <div className="bg-white dark:bg-zinc-900 rounded-2xl shadow-xl border border-zinc-200 dark:border-zinc-800 max-w-lg w-full max-h-[90vh] overflow-y-auto p-6" onClick={(e) => e.stopPropagation()}>
@@ -297,7 +514,7 @@ export default function PrescriptionsPage() {
                 <p className="text-zinc-500 text-sm">No items.</p>
               )}
             </div>
-            {pharmacies.length > 0 && !selectedPrescription.pharmacyId && (
+            {pharmacies.length > 0 && !normId(selectedPrescription.pharmacyId) && (
               <div className="mt-4 pt-4 border-t border-zinc-200 dark:border-zinc-700">
                 <p className="text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-2">Send to pharmacy (for medicine)</p>
                 <select
@@ -336,7 +553,7 @@ export default function PrescriptionsPage() {
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50" onClick={() => !sendingToPharmacy && setSendToPharmacyModal(null)}>
           <div className="bg-white dark:bg-zinc-900 rounded-2xl shadow-xl border border-zinc-200 dark:border-zinc-800 max-w-md w-full p-6" onClick={(e) => e.stopPropagation()}>
             <h3 className="text-lg font-bold text-zinc-900 dark:text-zinc-50">Send prescription to pharmacy</h3>
-            <p className="mt-1 text-sm text-zinc-500">Patient: {getPatientName(sendToPharmacyModal.patientId)}. Select pharmacy to assign. They will see it in their panel for medicine fulfillment.</p>
+            <p className="mt-1 text-sm text-zinc-500">Patient: {getPatientName(sendToPharmacyModal.patientId || sendToPharmacyModal.patient || sendToPharmacyModal.userId)}. Select pharmacy to assign. They will see it in their panel for medicine fulfillment.</p>
             <div className="mt-4">
               <label className="block text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-2">Pharmacy</label>
               <select id="send-pharmacy-select" className="w-full rounded-lg border border-zinc-300 dark:border-zinc-600 bg-white dark:bg-zinc-800 px-4 py-2 text-zinc-900 dark:text-zinc-50">
