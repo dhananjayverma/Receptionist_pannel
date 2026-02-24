@@ -1,9 +1,11 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { toast } from "react-toastify";
 import { buildApiUrl, getAuthHeaders, HOSPITALS_PATH } from "../../lib/api";
 import { formatOpdNumber } from "../../lib/receptionUtils";
 import SuccessModal from "../../components/SuccessModal";
+import LoadingSpinner from "../../components/LoadingSpinner";
 
 /** Normalize patient from API (supports age, gender, bloodGroup or blood_group, dob/dateOfBirth for age). */
 function normalizePatient(p) {
@@ -38,7 +40,6 @@ export default function PatientsPage() {
   const [searching, setSearching] = useState(false);
   const [showAddModal, setShowAddModal] = useState(false);
   const [saving, setSaving] = useState(false);
-  const [message, setMessage] = useState({ type: "", text: "" });
   const [successModal, setSuccessModal] = useState({ open: false, title: "", message: "" });
   const [localDetails, setLocalDetails] = useState({});
   const [form, setForm] = useState({
@@ -108,7 +109,7 @@ export default function PatientsPage() {
         setPatients(list.map(normalizePatient));
       }
     } catch (e) {
-      setMessage({ type: "error", text: "Failed to load patients" });
+      toast.error("Failed to load patients");
     } finally {
       setLoading(false);
     }
@@ -126,9 +127,9 @@ export default function PatientsPage() {
         return (ph && (ph.slice(-10) === normalized.slice(-10) || ph.includes(normalized))) || (aadhaarNorm.length >= 4 && (p.aadhaar || "").replace(/\D/g, "").slice(-4) === aadhaarNorm.slice(-4));
       });
       setFoundPatient(match || null);
-      setMessage({ type: match ? "success" : "info", text: match ? "Returning patient found." : "No patient with this mobile/Aadhaar. You can add new." });
+      match ? toast.success("Returning patient found.") : toast.info("No patient with this mobile/Aadhaar. You can add new.");
     } catch (e) {
-      setMessage({ type: "error", text: "Search failed" });
+      toast.error("Search failed");
     } finally {
       setSearching(false);
     }
@@ -137,18 +138,17 @@ export default function PatientsPage() {
   async function addPatient(e) {
     e.preventDefault();
     setSaving(true);
-    setMessage({ type: "", text: "" });
     const mobileNorm = (form.mobile || "").replace(/\D/g, "").slice(-10);
     const existingByMobile = patients.find((p) => (p.phone || p.mobile || "").replace(/\D/g, "").slice(-10) === mobileNorm);
     if (existingByMobile) {
-      setMessage({ type: "error", text: "Patient with this mobile already exists." });
+      toast.error("Patient with this mobile already exists.");
       setSaving(false);
       return;
     }
     if (form.aadhaar && form.aadhaar.replace(/\D/g, "").length >= 4) {
       const aadhaarNorm = form.aadhaar.replace(/\D/g, "").slice(-4);
       if (patients.find((p) => (p.aadhaar || "").replace(/\D/g, "").slice(-4) === aadhaarNorm)) {
-        setMessage({ type: "error", text: "Patient with this Aadhaar already exists." });
+        toast.error("Patient with this Aadhaar already exists.");
         setSaving(false);
         return;
       }
@@ -193,12 +193,12 @@ export default function PatientsPage() {
         }
       }
       setSuccessModal({ open: true, title: "Patient added", message: `Patient registered successfully. OPD: ${opdNumber}` });
-      setMessage({ type: "success", text: `Patient added. OPD: ${opdNumber}` });
+      toast.success(`Patient added. OPD: ${opdNumber}`);
       setShowAddModal(false);
       setForm({ hospitalId: "", name: "", email: "", age: "", dob: "", gender: "", mobile: "", aadhaar: "", address: "", bloodGroup: "" });
       fetchPatients();
     } catch (err) {
-      setMessage({ type: "error", text: err.message || "Failed to add patient" });
+      toast.error(err.message || "Failed to add patient");
     } finally {
       setSaving(false);
     }
@@ -215,10 +215,10 @@ export default function PatientsPage() {
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data.message || "Failed to delete patient");
       setSuccessModal({ open: true, title: "Patient deleted", message: "Patient has been removed successfully." });
-      setMessage({ type: "success", text: "Patient deleted" });
+      toast.success("Patient deleted");
       fetchPatients();
     } catch (err) {
-      setMessage({ type: "error", text: err.message || "Failed to delete patient" });
+      toast.error(err.message || "Failed to delete patient");
     }
   }
 
@@ -234,15 +234,10 @@ export default function PatientsPage() {
           <h1 className="text-xl font-bold text-[#1a202c] uppercase tracking-tight">Patients</h1>
           <p className="mt-1 text-sm text-[#4a5568]">Register walk-in patients. Search by mobile or Aadhaar.</p>
         </div>
-        <button type="button" onClick={() => { setShowAddModal(true); setMessage({ type: "", text: "" }); }} className="gov-btn-primary inline-flex items-center justify-center px-4 py-2.5">
+        <button type="button" onClick={() => setShowAddModal(true)} className="gov-btn-primary inline-flex items-center justify-center px-4 py-2.5">
           + Add patient
         </button>
       </div>
-      {message.text && (
-        <div className={`border px-4 py-3 text-sm ${message.type === "error" ? "bg-red-50 text-red-800 border-red-600" : message.type === "success" ? "bg-[#e3f2fd] text-[#0d47a1] border-[#0d47a1]" : "bg-[#f8fafc] text-[#2d3748] border-[#cbd5e0]"}`}>
-          {message.text}
-        </div>
-      )}
       <div className="gov-card p-4">
         <label className="block text-sm font-semibold text-[#2d3748]">Search by name, email, mobile or Aadhaar</label>
         <div className="mt-2 flex gap-2">
@@ -272,7 +267,7 @@ export default function PatientsPage() {
               </tr>
             </thead>
             <tbody>
-              {loading ? <tr><td colSpan={8} className="text-center text-[#718096] py-8">Loading…</td></tr> : filteredList.length === 0 ? <tr><td colSpan={8} className="text-center text-[#718096] py-8">No patients found.</td></tr> : filteredList.map((p) => {
+              {loading ? <tr><td colSpan={8} className="text-center py-8"><div className="flex justify-center"><LoadingSpinner /></div><p className="mt-2 text-sm text-[#718096]">Loading patients…</p></td></tr> : filteredList.length === 0 ? <tr><td colSpan={8} className="text-center text-[#718096] py-8">No patients found.</td></tr> : filteredList.map((p) => {
                 const id = p._id || p.id;
                 const merged = { ...p, ...localDetails[id] };
                 const np = normalizePatient(merged);

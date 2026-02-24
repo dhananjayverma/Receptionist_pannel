@@ -1,8 +1,10 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { toast } from "react-toastify";
 import { buildApiUrl, getAuthHeaders, PHARMACIES_PATH } from "../../lib/api";
 import SuccessModal from "../../components/SuccessModal";
+import { LoadingOverlay } from "../../components/LoadingSpinner";
 
 export default function PrescriptionsPage() {
   const [prescriptions, setPrescriptions] = useState([]);
@@ -11,7 +13,6 @@ export default function PrescriptionsPage() {
   const [appointments, setAppointments] = useState([]);
   const [pharmacies, setPharmacies] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [message, setMessage] = useState({ type: "", text: "" });
   const [filter, setFilter] = useState({
     patientId: "",
     doctorId: "",
@@ -154,7 +155,7 @@ export default function PrescriptionsPage() {
       setAppointments(aptList);
       setPharmacies(pharmList);
     } catch (e) {
-      setMessage({ type: "error", text: "Failed to load data" });
+      toast.error("Failed to load data");
     } finally {
       setLoading(false);
     }
@@ -162,7 +163,6 @@ export default function PrescriptionsPage() {
 
   async function applyFilter() {
     setLoading(true);
-    setMessage({ type: "", text: "" });
     try {
       const params = new URLSearchParams();
       if (filter.patientId) params.set("patientId", filter.patientId);
@@ -188,7 +188,7 @@ export default function PrescriptionsPage() {
       }
       setPrescriptions(data);
     } catch (e) {
-      setMessage({ type: "error", text: "Filter failed" });
+      toast.error("Filter failed");
     } finally {
       setLoading(false);
     }
@@ -286,11 +286,10 @@ export default function PrescriptionsPage() {
   async function sendPrescriptionToPharmacy(prescriptionId, pharmacyId) {
     const prescription = prescriptions.find((p) => (p._id || p.id) === prescriptionId);
     if (!prescription || !prescription.items || prescription.items.length === 0) {
-      setMessage({ type: "error", text: "Prescription has no items" });
-      return;
+      toast.error("Prescription has no items");
+        return;
     }
     setSendingToPharmacy(true);
-    setMessage({ type: "", text: "" });
     try {
       const res = await fetch(buildApiUrl(`/api/prescriptions/${prescriptionId}`), {
         method: "PUT",
@@ -308,7 +307,7 @@ export default function PrescriptionsPage() {
       setSelectedPrescription(null);
       fetchData();
     } catch (e) {
-      setMessage({ type: "error", text: e.message || "Failed to send to pharmacy" });
+      toast.error(e.message || "Failed to send to pharmacy");
     } finally {
       setSendingToPharmacy(false);
     }
@@ -323,12 +322,6 @@ export default function PrescriptionsPage() {
         <h1 className="text-2xl font-bold text-zinc-900 dark:text-zinc-50">Doctor Prescription Report</h1>
         <p className="mt-1 text-sm text-zinc-500 dark:text-zinc-400">View prescriptions, send to pharmacy for medicine fulfillment. Pharmacy will see it in their panel.</p>
       </div>
-
-      {message.text && (
-        <div className={`rounded-lg px-4 py-3 text-sm ${message.type === "error" ? "bg-red-50 dark:bg-red-900/20 text-red-700 dark:text-red-300 border border-red-200" : "bg-emerald-50 dark:bg-emerald-900/20 text-emerald-700 dark:text-emerald-300 border border-emerald-200"}`}>
-          {message.text}
-        </div>
-      )}
 
       {pharmacies.length > 0 && (
         <div className="rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-4 shadow-sm">
@@ -400,9 +393,7 @@ export default function PrescriptionsPage() {
         </div>
         <div className="overflow-x-auto">
           {loading ? (
-            <div className="py-12 text-center">
-              <p className="text-zinc-500 dark:text-zinc-400">Loading prescriptions…</p>
-            </div>
+            <LoadingOverlay text="Loading prescriptions…" />
           ) : filteredList.length === 0 ? (
             <div className="py-12 text-center">
               <p className="text-zinc-500 dark:text-zinc-400">No prescriptions found.</p>
@@ -532,7 +523,7 @@ export default function PrescriptionsPage() {
                     const sel = document.getElementById("pharmacy-select-modal");
                     const pharmacyId = sel?.value;
                     if (pharmacyId) sendPrescriptionToPharmacy(selectedPrescription._id || selectedPrescription.id, pharmacyId);
-                    else setMessage({ type: "error", text: "Select a pharmacy" });
+                    else toast.error("Select a pharmacy");
                   }}
                   disabled={sendingToPharmacy}
                   className="w-full rounded-lg bg-blue-600 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50"
@@ -574,7 +565,7 @@ export default function PrescriptionsPage() {
                 onClick={() => {
                   const sel = document.getElementById("send-pharmacy-select");
                   const pharmacyId = sel?.value;
-                  if (!pharmacyId) { setMessage({ type: "error", text: "Select a pharmacy" }); return; }
+                  if (!pharmacyId) { toast.error("Select a pharmacy"); return; }
                   sendPrescriptionToPharmacy(sendToPharmacyModal._id || sendToPharmacyModal.id, pharmacyId);
                 }}
                 disabled={sendingToPharmacy}

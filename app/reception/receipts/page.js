@@ -1,11 +1,11 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import { toast } from "react-toastify";
 import SuccessModal from "../../components/SuccessModal";
 
 export default function ReceiptsPage() {
   const [receiptId, setReceiptId] = useState("");
-  const [message, setMessage] = useState("");
   const [storedReceipts, setStoredReceipts] = useState([]);
   const [successModal, setSuccessModal] = useState({ open: false, title: "", message: "" });
 
@@ -41,9 +41,8 @@ export default function ReceiptsPage() {
   }
 
   function handleReprint() {
-    setMessage("");
     if (!receiptId.trim()) {
-      setMessage("Enter receipt ID");
+      toast.error("Enter receipt ID");
       return;
     }
     const found = storedReceipts.find((r) => (r.id || "").toString() === receiptId.trim());
@@ -51,7 +50,7 @@ export default function ReceiptsPage() {
       printReceipt(found);
       setSuccessModal({ open: true, title: "Reprint", message: "Receipt print window opened. Use Print or Save as PDF." });
     } else {
-      setMessage("Receipt not found. Use a receipt ID from OPD & Billing (e.g. RCP-...).");
+      toast.error("Receipt not found. Use a receipt ID from OPD & Billing (e.g. RCP-...).");
     }
   }
 
@@ -78,7 +77,6 @@ export default function ReceiptsPage() {
             Reprint
           </button>
         </div>
-        {message && <p className="mt-3 text-sm text-zinc-600 dark:text-zinc-400">{message}</p>}
       </div>
 
       {storedReceipts.length > 0 && (

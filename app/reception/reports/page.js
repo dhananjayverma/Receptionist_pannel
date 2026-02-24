@@ -1,8 +1,10 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { toast } from "react-toastify";
 import { buildApiUrl, getAuthHeaders, HOSPITALS_PATH } from "../../lib/api";
 import { todayStr } from "../../lib/receptionUtils";
+import { LoadingOverlay } from "../../components/LoadingSpinner";
 
 export default function ReportsPage() {
   const [loading, setLoading] = useState(true);
@@ -25,8 +27,9 @@ export default function ReportsPage() {
       setAppointments(Array.isArray(apts) ? apts : []);
       setDoctors(Array.isArray(docs) ? docs : []);
       setHospitals(Array.isArray(hosps) ? hosps : []);
-    } catch (e) {}
-    finally { setLoading(false); }
+    } catch (e) {
+      toast.error("Failed to load reports");
+    } finally { setLoading(false); }
   }
 
   useEffect(() => {
@@ -44,7 +47,9 @@ export default function ReportsPage() {
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data.message || "Failed to delete");
       fetchData();
-    } catch (e) {}
+    } catch (e) {
+      toast.error(e?.message || "Failed to delete");
+    }
   }
 
   const dateApts = (appointments || []).filter((a) => {
@@ -75,7 +80,7 @@ export default function ReportsPage() {
     return (
       <div className="space-y-6">
         <h1 className="text-2xl font-bold text-zinc-900 dark:text-zinc-50">Reports</h1>
-        <p className="text-zinc-500">Loading…</p>
+        <LoadingOverlay text="Loading reports…" />
       </div>
     );
   }

@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { buildApiUrl, getAuthHeaders, HOSPITALS_PATH } from "../../lib/api";
 import { todayStr } from "../../lib/receptionUtils";
+import { LoadingOverlay } from "../../components/LoadingSpinner";
 
 const PAYMENT_MODES = [
   { id: "CASH", label: "Cash", color: "bg-amber-100 dark:bg-amber-900/30 text-amber-800 dark:text-amber-200" },
@@ -105,7 +106,7 @@ export default function PaymentsPage() {
       <div className="rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 shadow-sm overflow-hidden">
         <h2 className="px-4 py-3 font-semibold text-zinc-900 dark:text-zinc-50 border-b border-zinc-200 dark:border-zinc-800">Recent payments</h2>
         {loading ? (
-          <div className="p-6 text-center text-zinc-500">Loading…</div>
+          <LoadingOverlay text="Loading payments…" />
         ) : payments.length === 0 ? (
           <div className="p-6 text-center text-zinc-500">No payments for this date. Use OPD & Billing to collect fees — they will appear here if you enable &quot;Save to payment summary&quot; there.</div>
         ) : (

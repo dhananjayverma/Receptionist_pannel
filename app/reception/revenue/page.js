@@ -1,8 +1,10 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { toast } from "react-toastify";
 import { buildApiUrl, getAuthHeaders, HOSPITALS_PATH } from "../../lib/api";
 import { todayStr } from "../../lib/receptionUtils";
+import { LoadingOverlay } from "../../components/LoadingSpinner";
 
 const PAYMENTS_KEY = "reception_payments";
 const RECEIPTS_KEY = "reception_receipts";
@@ -26,7 +28,6 @@ export default function RevenuePage() {
   const [dateTo, setDateTo] = useState(todayStr());
   const [reportDownloadType, setReportDownloadType] = useState("summary");
   const [loading, setLoading] = useState(true);
-  const [message, setMessage] = useState({ type: "", text: "" });
 
   useEffect(() => {
     setPayments(loadPayments());
@@ -120,7 +121,16 @@ export default function RevenuePage() {
     a.download = `revenue-report-${dateFrom}-to-${dateTo}.csv`;
     a.click();
     URL.revokeObjectURL(url);
-    setMessage({ type: "success", text: "Report downloaded." });
+    toast.success("Report downloaded.");
+  }
+
+  if (loading) {
+    return (
+      <div className="space-y-6">
+        <h1 className="text-xl font-bold text-[#1a202c] uppercase tracking-tight">Revenue & Invoices</h1>
+        <LoadingOverlay text="Loading revenue…" />
+      </div>
+    );
   }
 
   return (
@@ -129,12 +139,6 @@ export default function RevenuePage() {
         <h1 className="text-xl font-bold text-[#1a202c] uppercase tracking-tight">Revenue & Invoices</h1>
         <p className="mt-1 text-sm text-[#4a5568]">Total revenue, generate invoice (mandatory, auto-download), download reports, hospital-wise and doctor-wise payment records.</p>
       </div>
-
-      {message.text && (
-        <div className={`border px-4 py-3 text-sm rounded ${message.type === "error" ? "bg-red-50 text-red-800 border-red-600" : "bg-[#e8f5e9] text-[#2e7d32] border-[#2e7d32]"}`}>
-          {message.text}
-        </div>
-      )}
 
       {/* Total Revenue Panel */}
       <div className="gov-card p-6 border-2 border-[#0d47a1] bg-[#e3f2fd]">

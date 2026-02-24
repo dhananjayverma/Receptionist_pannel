@@ -1,7 +1,9 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { toast } from "react-toastify";
 import { buildApiUrl, getAuthHeaders, apiFetch, NETWORK_ERROR_MESSAGE } from "../../lib/api";
+import { LoadingOverlay } from "../../components/LoadingSpinner";
 
 export default function HistoryPage() {
   const [patients, setPatients] = useState([]);
@@ -10,7 +12,6 @@ export default function HistoryPage() {
   const [loading, setLoading] = useState(true);
   const [searchId, setSearchId] = useState("");
   const [selectedPatient, setSelectedPatient] = useState(null);
-  const [message, setMessage] = useState({ type: "", text: "" });
 
   useEffect(() => {
     fetchData();
@@ -18,7 +19,6 @@ export default function HistoryPage() {
 
   async function fetchData() {
     setLoading(true);
-    setMessage({ type: "", text: "" });
     try {
       const headers = getAuthHeaders();
       const [patRes, aptRes, docRes] = await Promise.all([
@@ -33,7 +33,7 @@ export default function HistoryPage() {
       setAppointments(Array.isArray(apts) ? apts : []);
       setDoctors(Array.isArray(docs) ? docs : []);
     } catch (e) {
-      setMessage({ type: "error", text: e?.message === "BACKEND_UNREACHABLE" ? NETWORK_ERROR_MESSAGE : (e?.message || "Failed to load data") });
+      toast.error(e?.message === "BACKEND_UNREACHABLE" ? NETWORK_ERROR_MESSAGE : (e?.message || "Failed to load data"));
     } finally {
       setLoading(false);
     }
@@ -51,7 +51,6 @@ export default function HistoryPage() {
     const q = searchId.trim().toLowerCase();
     if (!q) {
       setSelectedPatient(null);
-      setMessage({ type: "", text: "" });
       return;
     }
     const byPhone = patients.find((p) => (p.phone || p.mobile || "").toString().replace(/\D/g, "").includes(q.replace(/\D/g, "")));
@@ -59,7 +58,7 @@ export default function HistoryPage() {
     const byId = patients.find((p) => (p._id || p.id || "").toString().toLowerCase().includes(q));
     const found = byPhone || byName || byId || null;
     setSelectedPatient(found);
-    setMessage(found ? { type: "success", text: `Found: ${found.name}` } : { type: "error", text: "No patient found." });
+    found ? toast.success(`Found: ${found.name}`) : toast.error("No patient found.");
   }
 
   async function deleteAppointment(aptId) {
@@ -72,10 +71,10 @@ export default function HistoryPage() {
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data.message || "Failed to delete");
-      setMessage({ type: "success", text: "Appointment deleted." });
+      toast.success("Appointment deleted.");
       fetchData();
     } catch (e) {
-      setMessage({ type: "error", text: e.message || "Failed to delete appointment" });
+      toast.error(e.message || "Failed to delete appointment");
     }
   }
 
@@ -87,20 +86,6 @@ export default function HistoryPage() {
           <p className="mt-1 text-sm text-[#4a5568]">Search by mobile, name or patient ID to view visit history.</p>
         </div>
       </div>
-
-      {message.text && (
-        <div
-          className={`border px-4 py-3 text-sm rounded ${
-            message.type === "error"
-              ? "bg-red-50 text-red-800 border-red-600"
-              : message.type === "success"
-                ? "bg-[#e8f5e9] text-[#2e7d32] border-[#2e7d32]"
-                : "bg-[#e3f2fd] text-[#0d47a1] border-[#0d47a1]"
-          }`}
-        >
-          {message.text}
-        </div>
-      )}
 
       <div className="gov-card p-4">
         <label className="block text-sm font-semibold text-[#2d3748] mb-2">Search by mobile, name or patient ID</label>
@@ -120,10 +105,10 @@ export default function HistoryPage() {
       </div>
 
       {loading && (
-        <div className="gov-card p-8 text-center text-[#718096]">Loading…</div>
+        <LoadingOverlay text="Loading history…" />
       )}
 
-      {!loading && searchId && !selectedPatient && !message.text && (
+      {!loading && searchId && !selectedPatient && (
         <div className="gov-card p-6 text-center text-[#718096]">Enter a search term and click Search to find a patient.</div>
       )}
 

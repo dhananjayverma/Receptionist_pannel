@@ -1,8 +1,10 @@
 "use client";
 
 import { useEffect, useState, useCallback } from "react";
+import { toast } from "react-toastify";
 import { buildApiUrl, getAuthHeaders } from "../../lib/api";
 import SuccessModal from "../../components/SuccessModal";
+import LoadingSpinner from "../../components/LoadingSpinner";
 
 const PAYMENT_MODES = ["CASH", "UPI", "CARD", "BANK_TRANSFER", "OTHER"];
 const RECEIPTS_KEY = "reception_receipts";
@@ -36,7 +38,6 @@ function loadReceipts() {
 export default function InvoicesPage() {
   const [receipts, setReceipts] = useState([]);
   const [loading, setLoading] = useState(false);
-  const [message, setMessage] = useState({ type: "", text: "" });
   const [orderId, setOrderId] = useState("");
   const [manualInvoice, setManualInvoice] = useState(() => defaultManualInvoice());
   const [successModal, setSuccessModal] = useState({ open: false, title: "", message: "" });
@@ -60,17 +61,16 @@ export default function InvoicesPage() {
 
   async function downloadOrderInvoice() {
     if (!orderId.trim()) {
-      setMessage({ type: "error", text: "Enter order ID" });
+      toast.error("Enter order ID");
       return;
     }
-    setMessage({ type: "", text: "" });
     const token = typeof window !== "undefined" ? localStorage.getItem("token") : null;
     if (!token) {
-      setMessage({ type: "error", text: "Not logged in" });
+      toast.error("Not logged in");
       return;
     }
     setLoading(true);
-    setMessage({ type: "info", text: "Downloading invoice PDF…" });
+    toast.info("Downloading invoice PDF…");
     try {
       const res = await fetch(buildApiUrl(`/api/invoices/order/${orderId.trim()}`), {
         headers: getAuthHeaders(),
@@ -87,9 +87,9 @@ export default function InvoicesPage() {
       a.click();
       URL.revokeObjectURL(url);
       setSuccessModal({ open: true, title: "Invoice downloaded", message: "Invoice PDF has been downloaded." });
-      setMessage({ type: "success", text: "Invoice downloaded." });
+      toast.success("Invoice downloaded.");
     } catch (e) {
-      setMessage({ type: "error", text: e.message || "Download failed" });
+      toast.error(e.message || "Download failed");
     } finally {
       setLoading(false);
     }
@@ -129,7 +129,7 @@ export default function InvoicesPage() {
       } catch (e) {}
     }
     setReceipts(next);
-    setMessage({ type: "success", text: "Receipt removed from list." });
+    toast.success("Receipt removed from list.");
   }
 
   function addManualItem() {
@@ -165,20 +165,20 @@ export default function InvoicesPage() {
   function generateManualInvoice() {
     const m = manualInvoice;
     if (!m.customerName.trim()) {
-      setMessage({ type: "error", text: "Customer / Patient name is required" });
+      toast.error("Customer / Patient name is required");
       return;
     }
     const items = m.items.filter((row) => (row.description || "").trim() || Number(row.amount) > 0);
     const medicines = (m.medicines || []).filter((row) => (row.name || "").trim() || Number(row.quantity) > 0 || Number(row.amount) > 0);
     if (items.length === 0 && medicines.length === 0) {
-      setMessage({ type: "error", text: "Add at least one line item or medicine with amount" });
+      toast.error("Add at least one line item or medicine with amount");
       return;
     }
     const itemsTotal = items.reduce((sum, row) => sum + (Number(row.amount) || 0), 0);
     const medicinesTotal = medicines.reduce((sum, row) => sum + (Number(row.amount) || 0), 0);
     const total = itemsTotal + medicinesTotal;
     if (total <= 0) {
-      setMessage({ type: "error", text: "Total must be greater than 0" });
+      toast.error("Total must be greater than 0");
       return;
     }
 
@@ -283,12 +283,11 @@ export default function InvoicesPage() {
     w.document.close();
     w.print();
     setSuccessModal({ open: true, title: "Invoice generated", message: "Invoice downloaded automatically and opened for printing. You can also open the downloaded HTML file and print or save as PDF." });
-    setMessage({ type: "success", text: "Invoice downloaded automatically and opened for print." });
+    toast.success("Invoice downloaded automatically and opened for print.");
   }
 
   function resetManualForm() {
     setManualInvoice(defaultManualInvoice());
-    setMessage({ type: "", text: "" });
   }
 
   const displayReceipts = [...receipts].reverse();
@@ -308,20 +307,6 @@ export default function InvoicesPage() {
           <p className="mt-1 text-sm text-[#4a5568]">Reprint OPD receipts from booking payments, download order invoices, or generate custom invoices.</p>
         </div>
       </div>
-
-      {message.text && (
-        <div
-          className={`border px-4 py-3 text-sm rounded ${
-            message.type === "error"
-              ? "bg-red-50 text-red-800 border-red-600"
-              : message.type === "success"
-                ? "bg-[#e8f5e9] text-[#2e7d32] border-[#2e7d32]"
-                : "bg-[#e3f2fd] text-[#0d47a1] border-[#0d47a1]"
-          }`}
-        >
-          {message.text}
-        </div>
-      )}
 
       {/* Section tabs */}
       <div className="flex gap-2 border-b-2 border-[#cbd5e0]">
@@ -419,8 +404,8 @@ export default function InvoicesPage() {
               placeholder="Order ID"
               className="gov-input flex-1 min-w-[200px] bg-white px-4 py-2 text-[#1a202c]"
             />
-            <button type="button" onClick={downloadOrderInvoice} disabled={loading} className="gov-btn-primary px-5 py-2.5 disabled:opacity-50">
-              {loading ? "Downloading…" : "Download PDF"}
+            <button type="button" onClick={downloadOrderInvoice} disabled={loading} className="gov-btn-primary px-5 py-2.5 disabled:opacity-50 inline-flex items-center justify-center gap-2">
+              {loading ? <><LoadingSpinner size="sm" /> Downloading…</> : "Download PDF"}
             </button>
           </div>
         </div>

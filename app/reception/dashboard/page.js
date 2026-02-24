@@ -1,12 +1,13 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { toast } from "react-toastify";
 import { buildApiUrl, getAuthHeaders, HOSPITALS_PATH, apiFetch, NETWORK_ERROR_MESSAGE } from "../../lib/api";
 import { todayStr } from "../../lib/receptionUtils";
+import { LoadingOverlay } from "../../components/LoadingSpinner";
 
 export default function DashboardPage() {
   const [loading, setLoading] = useState(true);
-  const [message, setMessage] = useState({ type: "", text: "" });
   const [selectedHospitalId, setSelectedHospitalId] = useState("");
   const [hospitals, setHospitals] = useState([]);
   const [stats, setStats] = useState({
@@ -75,7 +76,7 @@ export default function DashboardPage() {
         });
       } catch (e) {
         if (!cancelled) {
-          setMessage({ type: "error", text: e?.message === "BACKEND_UNREACHABLE" ? NETWORK_ERROR_MESSAGE : (e?.message || "Failed to load data") });
+          toast.error(e?.message === "BACKEND_UNREACHABLE" ? NETWORK_ERROR_MESSAGE : (e?.message || "Failed to load data"));
         }
       } finally {
         if (!cancelled) setLoading(false);
@@ -89,11 +90,7 @@ export default function DashboardPage() {
     return (
       <div className="space-y-6">
         <h1 className="text-xl font-bold text-[#1a202c] uppercase tracking-tight">Dashboard</h1>
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-          {[1, 2, 3, 4].map((i) => (
-            <div key={i} className="h-24 gov-card animate-pulse" />
-          ))}
-        </div>
+        <LoadingOverlay text="Loading dashboard…" />
       </div>
     );
   }
@@ -109,11 +106,6 @@ export default function DashboardPage() {
 
   return (
     <div className="space-y-8">
-      {message.text && (
-        <div className={`border px-4 py-3 text-sm rounded ${message.type === "error" ? "bg-red-50 text-red-800 border-red-600" : "bg-[#e3f2fd] text-[#0d47a1] border-[#0d47a1]"}`}>
-          {message.text}
-        </div>
-      )}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div>
           <h1 className="text-xl font-bold text-[#1a202c] uppercase tracking-tight">Dashboard</h1>

@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState, useCallback } from "react";
+import { toast } from "react-toastify";
 import { buildApiUrl, getAuthHeaders, HOSPITALS_PATH, apiFetch, NETWORK_ERROR_MESSAGE } from "../../lib/api";
 import {
   todayStr,
@@ -12,6 +13,7 @@ import {
   AVG_CONSULTATION_MIN,
 } from "../../lib/receptionUtils";
 import SuccessModal from "../../components/SuccessModal";
+import { LoadingOverlay } from "../../components/LoadingSpinner";
 
 const APPT_TYPES = [
   { value: "WALK_IN", label: "Walk-in" },
@@ -36,7 +38,6 @@ export default function AppointmentsPage() {
   const [hospitals, setHospitals] = useState([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
-  const [message, setMessage] = useState({ type: "", text: "" });
   const [bookModalOpen, setBookModalOpen] = useState(false);
   const [bookForm, setBookForm] = useState({
     hospitalId: "",
@@ -90,7 +91,7 @@ export default function AppointmentsPage() {
       setPatients(pats);
       setHospitals(hosps);
     } catch (e) {
-      setMessage({ type: "error", text: e?.message === "BACKEND_UNREACHABLE" ? NETWORK_ERROR_MESSAGE : (e?.message || "Failed to load data") });
+      toast.error(e?.message === "BACKEND_UNREACHABLE" ? NETWORK_ERROR_MESSAGE : (e?.message || "Failed to load data"));
     }
   }, []);
 
@@ -129,33 +130,32 @@ export default function AppointmentsPage() {
   async function bookAppointment(e) {
     e.preventDefault();
     if (!bookForm.hospitalId || !bookForm.doctorId || !bookForm.patientId || !bookForm.bookingDate || !bookForm.slotTime) {
-      setMessage({ type: "error", text: "Select hospital, doctor, patient, date and time slot" });
+      toast.error("Select hospital, doctor, patient, date and time slot");
       return;
     }
     const patient = patients.find((p) => (p._id || p.id) === bookForm.patientId);
     if (!patient) {
-      setMessage({ type: "error", text: "Patient not found. Please select a registered patient." });
+      toast.error("Patient not found. Please select a registered patient.");
       return;
     }
     const issueText = (bookForm.issue || "").trim();
     if (!issueText) {
-      setMessage({ type: "error", text: "Please enter chief complaint / issue for the visit." });
+      toast.error("Please enter chief complaint / issue for the visit.");
       return;
     }
     const doctor = doctors.find((d) => (d._id || d.id) === bookForm.doctorId);
     const bookDate = bookForm.bookingDate;
     if (isDoctorOnLeave(doctor, bookDate)) {
-      setMessage({ type: "error", text: "Doctor is on leave on the selected date." });
+      toast.error("Doctor is on leave on the selected date.");
       return;
     }
     const dateCount = getDoctorTodayCount(appointments, bookForm.doctorId, bookDate);
     const maxPerDay = doctor?.maxPatientsPerDay ?? 999;
     if (dateCount >= maxPerDay) {
-      setMessage({ type: "error", text: "Doctor is fully booked for the selected date." });
+      toast.error("Doctor is fully booked for the selected date.");
       return;
     }
     setSaving(true);
-    setMessage({ type: "", text: "" });
     try {
       const [y, mo, day] = bookForm.bookingDate.split("-").map(Number);
       const appointmentDate = new Date(y, mo - 1, day);
@@ -217,10 +217,10 @@ export default function AppointmentsPage() {
         isFollowUp: bookForm.type === "FOLLOW_UP",
         followUpFee: bookForm.type === "FOLLOW_UP" ? FOLLOW_UP_FEE : 0,
       }));
-      setMessage({ type: "success", text: "Appointment booked. Complete payment below." });
+      toast.success("Appointment booked. Complete payment below.");
       fetchData();
     } catch (err) {
-      setMessage({ type: "error", text: err.message || "Booking failed" });
+      toast.error(err.message || "Booking failed");
     } finally {
       setSaving(false);
     }
@@ -235,10 +235,10 @@ export default function AppointmentsPage() {
       });
       if (!res.ok) throw new Error("Update failed");
       setSuccessModal({ open: true, title: "Status updated", message: "Appointment status has been updated successfully." });
-      setMessage({ type: "success", text: "Status updated" });
+      toast.success("Status updated");
       fetchData();
     } catch (e) {
-      setMessage({ type: "error", text: "Failed to update status" });
+      toast.error("Failed to update status");
     }
   }
 
@@ -253,10 +253,10 @@ export default function AppointmentsPage() {
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data.message || "Failed to delete appointment");
       setSuccessModal({ open: true, title: "Appointment deleted", message: "Appointment has been removed successfully." });
-      setMessage({ type: "success", text: "Appointment deleted" });
+      toast.success("Appointment deleted");
       fetchData();
     } catch (e) {
-      setMessage({ type: "error", text: e.message || "Failed to delete appointment" });
+      toast.error(e.message || "Failed to delete appointment");
     }
   }
 
@@ -298,7 +298,7 @@ export default function AppointmentsPage() {
       title: "Payment collected",
       message: `₹${paymentTotal} collected via ${paymentForm.paymentMode}. Print receipt — Patient can wait for appointment at ${pendingPayment.slotTime}. Token #${pendingPayment.tokenNumber}.`,
     });
-    setMessage({ type: "success", text: "Payment collected. Print receipt below. Patient can wait for appointment time." });
+    toast.success("Payment collected. Print receipt below. Patient can wait for appointment time.");
     setPendingPayment(null);
   }
 
@@ -390,16 +390,10 @@ export default function AppointmentsPage() {
           <h1 className="text-xl font-bold text-[#1a202c] uppercase tracking-tight">Appointments & Queue</h1>
           <p className="mt-1 text-sm text-[#4a5568]">Today&apos;s queue. Book appointments via the button below. Queue refreshes every 5s.</p>
         </div>
-        <button type="button" onClick={() => { setBookModalOpen(true); setMessage({ type: "", text: "" }); setPendingPayment(null); setLastReceipt(null); setBookForm((f) => ({ ...f, doctorId: "", patientId: "", slotTime: "", issue: "", type: "WALK_IN", isEmergency: false })); }} className="gov-btn-primary px-5 py-2.5 whitespace-nowrap">
+        <button type="button" onClick={() => { setBookModalOpen(true); setPendingPayment(null); setLastReceipt(null); setBookForm((f) => ({ ...f, doctorId: "", patientId: "", slotTime: "", issue: "", type: "WALK_IN", isEmergency: false })); }} className="gov-btn-primary px-5 py-2.5 whitespace-nowrap">
           Book appointment
         </button>
       </div>
-
-      {message.text && (
-        <div className={`border px-4 py-3 text-sm ${message.type === "error" ? "bg-red-50 text-red-800 border-red-600" : "bg-[#e3f2fd] text-[#0d47a1] border-[#0d47a1]"}`}>
-          {message.text}
-        </div>
-      )}
 
       <div className="gov-card p-4 flex flex-wrap gap-4 items-end">
             <div>
@@ -433,7 +427,7 @@ export default function AppointmentsPage() {
             </div>
             <div className="overflow-x-auto">
               {loading && todayApts.length === 0 ? (
-                <div className="p-8 text-center text-[#718096]">Loading…</div>
+                <LoadingOverlay text="Loading queue…" />
               ) : todayApts.length === 0 ? (
                 <div className="p-8 text-center text-[#718096]">No appointments today.</div>
               ) : (
@@ -524,11 +518,6 @@ export default function AppointmentsPage() {
                     {step === 3 && <span className="ml-2 text-xs px-2 py-0.5 bg-green-100 text-green-800 border border-green-300 rounded">Payment done</span>}
                   </div>
                   <div className="px-6 pb-6">
-                    {step === 1 && message.type === "error" && message.text && (
-                      <div className="mb-4 p-3 rounded bg-red-50 text-red-800 border border-red-200 text-sm">
-                        {message.text}
-                      </div>
-                    )}
                     {step === 1 && (hospitals.length === 0 || patients.length === 0) && (
                       <div className="mb-4 p-3 rounded bg-amber-50 text-amber-800 border border-amber-200 text-sm">
                         {hospitals.length === 0 && "No hospitals loaded. "}

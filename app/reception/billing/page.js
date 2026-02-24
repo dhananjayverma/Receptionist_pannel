@@ -1,8 +1,10 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { toast } from "react-toastify";
 import { buildApiUrl, getAuthHeaders, HOSPITALS_PATH } from "../../lib/api";
 import SuccessModal from "../../components/SuccessModal";
+import { LoadingOverlay } from "../../components/LoadingSpinner";
 
 const PAYMENT_MODES = [
   { value: "CASH", label: "Cash" },
@@ -20,7 +22,6 @@ export default function BillingPage() {
   const [doctors, setDoctors] = useState([]);
   const [hospitals, setHospitals] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [message, setMessage] = useState({ type: "", text: "" });
   const [form, setForm] = useState({
     hospitalId: "",
     patientId: "",
@@ -54,7 +55,7 @@ export default function BillingPage() {
       setDoctors(docRes.ok ? await docRes.json() : []);
       setHospitals(hospRes?.ok ? await hospRes.json() : []);
     } catch (e) {
-      setMessage({ type: "error", text: "Failed to load data" });
+      toast.error("Failed to load data");
     } finally {
       setLoading(false);
     }
@@ -65,7 +66,6 @@ export default function BillingPage() {
   function handleCollectPayment(e) {
     e.preventDefault();
     setSaving(true);
-    setMessage({ type: "", text: "" });
     const patient = patients.find((p) => (p._id || p.id) === form.patientId);
     const apt = appointments.find((a) => (a._id || a.id) === form.appointmentId);
     const receipt = {
@@ -92,7 +92,7 @@ export default function BillingPage() {
         localStorage.setItem("reception_payments", JSON.stringify(payments));
       } catch (e) {}
     }
-    setMessage({ type: "success", text: `Receipt ${receipt.id} — ₹${total} collected via ${form.paymentMode}. Print below.` });
+    toast.success(`Receipt ${receipt.id} — ₹${total} collected via ${form.paymentMode}. Print below.`);
     setForm((f) => ({ ...f, appointmentId: "", patientId: "", followUpFee: 0, isFollowUp: false }));
     setSaving(false);
   }
@@ -129,12 +129,10 @@ export default function BillingPage() {
         <p className="mt-1 text-sm text-zinc-500 dark:text-zinc-400">Collect consultation fee, registration fee; print receipt</p>
       </div>
 
-      {message.text && (
-        <div className={`rounded-lg px-4 py-3 text-sm ${message.type === "error" ? "bg-red-50 dark:bg-red-900/20 text-red-700 dark:text-red-300 border border-red-200" : "bg-emerald-50 dark:bg-emerald-900/20 text-emerald-700 dark:text-emerald-300 border border-emerald-200"}`}>
-          {message.text}
-        </div>
-      )}
-
+      {loading ? (
+        <LoadingOverlay text="Loading billing…" />
+      ) : (
+      <>
       <div className="rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-6 shadow-sm max-w-xl">
         <h2 className="font-semibold text-zinc-900 dark:text-zinc-50 mb-4">Fee collection</h2>
         <form onSubmit={handleCollectPayment} className="space-y-4">
@@ -204,6 +202,8 @@ export default function BillingPage() {
             Print receipt
           </button>
         </div>
+      )}
+      </>
       )}
     </div>
   );

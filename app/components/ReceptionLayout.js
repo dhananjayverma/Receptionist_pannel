@@ -15,6 +15,7 @@ import {
   CloseIcon,
   HospitalIcon,
 } from "./ReceptionIcons";
+import { LoadingOverlay } from "./LoadingSpinner";
 
 const navItems = [
   { path: "/reception/dashboard", label: "Dashboard", icon: DashboardIcon, section: "Home", description: "Overview & today's stats" },
@@ -68,7 +69,7 @@ export default function ReceptionLayout({ children }) {
   if (!mounted || !user) {
     return (
       <div className="min-h-screen bg-gray-50 dark:bg-zinc-950 flex items-center justify-center">
-        <div className="text-zinc-500 dark:text-zinc-400">Loading...</div>
+        <LoadingOverlay text="Loading…" />
       </div>
     );
   }
