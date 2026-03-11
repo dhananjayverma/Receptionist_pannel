@@ -1,253 +1,282 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useCallback } from "react";
 import { toast } from "react-toastify";
 import { buildApiUrl, getAuthHeaders, HOSPITALS_PATH } from "../../lib/api";
-import { todayStr } from "../../lib/receptionUtils";
 import { LoadingOverlay } from "../../components/LoadingSpinner";
 
-const PAYMENTS_KEY = "reception_payments";
-const RECEIPTS_KEY = "reception_receipts";
-
-function loadPayments() {
-  if (typeof window === "undefined") return [];
-  try {
-    const raw = localStorage.getItem(PAYMENTS_KEY);
-    return raw ? JSON.parse(raw) : [];
-  } catch {
-    return [];
-  }
+function todayStr() { return new Date().toISOString().slice(0, 10); }
+function monthStartStr() {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-01`;
 }
 
 export default function RevenuePage() {
-  const [payments, setPayments] = useState([]);
-  const [appointments, setAppointments] = useState([]);
-  const [doctors, setDoctors] = useState([]);
-  const [hospitals, setHospitals] = useState([]);
-  const [dateFrom, setDateFrom] = useState(todayStr());
-  const [dateTo, setDateTo] = useState(todayStr());
-  const [reportDownloadType, setReportDownloadType] = useState("summary");
   const [loading, setLoading] = useState(true);
+  const [revenue, setRevenue] = useState(null);
+  const [doctorRevenue, setDoctorRevenue] = useState([]);
+  const [hospitals, setHospitals] = useState([]);
+  const [hospitalId, setHospitalId] = useState("");
+  const [dateFrom, setDateFrom] = useState(monthStartStr());
+  const [dateTo, setDateTo] = useState(todayStr());
+  const [activeTab, setActiveTab] = useState("overview");
 
   useEffect(() => {
-    setPayments(loadPayments());
+    fetch(buildApiUrl(HOSPITALS_PATH), { headers: getAuthHeaders() })
+      .then((r) => r.json()).then((d) => setHospitals(Array.isArray(d) ? d : [])).catch(() => {});
   }, []);
 
-  useEffect(() => {
-    let cancelled = false;
-    const headers = getAuthHeaders();
-    Promise.all([
-      fetch(buildApiUrl("/api/appointments"), { headers }),
-      fetch(buildApiUrl("/api/users?role=DOCTOR"), { headers }),
-      fetch(buildApiUrl(HOSPITALS_PATH), { headers }),
-    ])
-      .then(([a, d, h]) => Promise.all([a.json(), d.json(), h.json()]))
-      .then(([apts, docs, hosps]) => {
-        if (cancelled) return;
-        setAppointments(Array.isArray(apts) ? apts : Array.isArray(apts?.data) ? apts.data : []);
-        setDoctors(Array.isArray(docs) ? docs : Array.isArray(docs?.users) ? docs.users : []);
-        setHospitals(Array.isArray(hosps) ? hosps : Array.isArray(hosps?.data) ? hosps.data : []);
-      })
-      .catch(() => {})
-      .finally(() => {
-        if (!cancelled) setLoading(false);
-      });
-    return () => { cancelled = true; };
-  }, []);
-
-  const paymentsInRange = payments.filter((p) => {
-    const d = (p.date || p.bookingDate || "").toString().slice(0, 10);
-    return d >= dateFrom && d <= dateTo;
-  });
-
-  const totalRevenue = paymentsInRange.reduce((sum, p) => sum + (Number(p.total) || 0), 0);
-  const totalCount = paymentsInRange.length;
-
-  const byHospital = paymentsInRange.reduce((acc, p) => {
-    const id = p.hospitalId || "unknown";
-    if (!acc[id]) acc[id] = { total: 0, count: 0 };
-    acc[id].total += Number(p.total) || 0;
-    acc[id].count += 1;
-    return acc;
-  }, {});
-
-  const appointmentMap = (appointments || []).reduce((acc, a) => {
-    acc[a._id || a.id] = a;
-    return acc;
-  }, {});
-
-  const byDoctor = paymentsInRange.reduce((acc, p) => {
-    const apt = p.appointmentId ? appointmentMap[p.appointmentId] : null;
-    const id = apt?.doctorId || "unknown";
-    if (!acc[id]) acc[id] = { total: 0, count: 0 };
-    acc[id].total += Number(p.total) || 0;
-    acc[id].count += 1;
-    return acc;
-  }, {});
-
-  const getDoctorName = (id) => doctors.find((d) => (d._id || d.id) === id)?.name || id;
-  const getHospitalName = (id) => hospitals.find((h) => (h._id || h.id) === id)?.name || id;
-
-  function downloadReport() {
-    const lines = [];
-    lines.push("Revenue Report");
-    lines.push(`From: ${dateFrom} To: ${dateTo}`);
-    lines.push("");
-    lines.push("Total Revenue (₹),Total Payments");
-    lines.push(`${totalRevenue},${totalCount}`);
-    lines.push("");
-
-    if (reportDownloadType === "hospital" || reportDownloadType === "summary") {
-      lines.push("Hospital-wise Payment Record");
-      lines.push("Hospital,Total (₹),Count");
-      Object.entries(byHospital).forEach(([id, v]) => {
-        lines.push(`${getHospitalName(id)},${v.total},${v.count}`);
-      });
-      lines.push("");
+  const fetchRevenue = useCallback(async () => {
+    setLoading(true);
+    try {
+      const base = `from=${dateFrom}&to=${dateTo}${hospitalId ? `&hospitalId=${hospitalId}` : ""}`;
+      const [revRes, drRes] = await Promise.all([
+        fetch(buildApiUrl(`/api/reports/hospital/revenue?${base}`), { headers: getAuthHeaders() }),
+        fetch(buildApiUrl(`/api/reports/hospital/doctor-revenue?${base}`), { headers: getAuthHeaders() }),
+      ]);
+      if (revRes.ok) setRevenue(await revRes.json());
+      else toast.error("Revenue report failed");
+      if (drRes.ok) setDoctorRevenue(await drRes.json());
+    } catch {
+      toast.error("Failed to load revenue data");
+    } finally {
+      setLoading(false);
     }
+  }, [dateFrom, dateTo, hospitalId]);
 
-    if (reportDownloadType === "doctor" || reportDownloadType === "summary") {
-      lines.push("Doctor-wise Payment Record");
-      lines.push("Doctor,Total (₹),Count");
-      Object.entries(byDoctor).forEach(([id, v]) => {
-        lines.push(`Dr. ${getDoctorName(id)},${v.total},${v.count}`);
-      });
-    }
+  useEffect(() => { fetchRevenue(); }, [fetchRevenue]);
 
+  function downloadCSV() {
+    if (!revenue) return;
+    const lines = [
+      "Revenue Report",
+      `From: ${dateFrom}  To: ${dateTo}`,
+      "",
+      "Metric,Value",
+      `Total Billed,${revenue.totalBilled}`,
+      `Total Collected,${revenue.totalCollected}`,
+      `Total Pending,${revenue.totalPending}`,
+      `Total Bills,${revenue.billCount}`,
+      "",
+      "Type,Billed,Collected",
+      ...(revenue.byType ? Object.entries(revenue.byType).map(([k, v]) => `${k},${v.billed || 0},${v.collected || 0}`) : []),
+      "",
+      "Payment Mode,Amount",
+      ...(revenue.byMode ? Object.entries(revenue.byMode).map(([k, v]) => `${k},${v}`) : []),
+      "",
+      "Doctor,OP Count,IP Count,OP Revenue,IP Revenue,Total Revenue",
+      ...doctorRevenue.map((d) => `${d.doctorName || d.doctorId},${d.opCount},${d.ipCount},${d.opRevenue},${d.ipRevenue},${d.totalRevenue}`),
+    ];
     const blob = new Blob([lines.join("\n")], { type: "text/csv;charset=utf-8" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
-    a.href = url;
-    a.download = `revenue-report-${dateFrom}-to-${dateTo}.csv`;
-    a.click();
+    a.href = url; a.download = `revenue-${dateFrom}-to-${dateTo}.csv`; a.click();
     URL.revokeObjectURL(url);
     toast.success("Report downloaded.");
   }
 
-  if (loading) {
-    return (
-      <div className="space-y-6">
-        <h1 className="text-xl font-bold text-[#1a202c] uppercase tracking-tight">Revenue & Invoices</h1>
-        <LoadingOverlay text="Loading revenue…" />
-      </div>
-    );
-  }
+  const tabs = [
+    { id: "overview", label: "Overview" },
+    { id: "by-type",  label: "By Type" },
+    { id: "by-mode",  label: "By Mode" },
+    { id: "doctors",  label: "Doctor-wise" },
+  ];
 
   return (
-    <div className="space-y-8">
-      <div>
-        <h1 className="text-xl font-bold text-[#1a202c] uppercase tracking-tight">Revenue & Invoices</h1>
-        <p className="mt-1 text-sm text-[#4a5568]">Total revenue, generate invoice (mandatory, auto-download), download reports, hospital-wise and doctor-wise payment records.</p>
-      </div>
-
-      {/* Total Revenue Panel */}
-      <div className="gov-card p-6 border-2 border-[#0d47a1] bg-[#e3f2fd]">
-        <h2 className="text-lg font-bold text-[#0d47a1] mb-2">Total Revenue</h2>
-        <p className="text-3xl font-bold text-[#1a202c]">₹{totalRevenue.toLocaleString("en-IN")}</p>
-        <p className="text-sm text-[#4a5568] mt-1">From {dateFrom} to {dateTo} · {totalCount} payment(s)</p>
-        <div className="flex flex-wrap gap-4 mt-4">
-          <div>
-            <label className="block text-xs font-semibold text-[#2d3748]">From date</label>
-            <input type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} className="gov-input mt-1 bg-white px-3 py-2 text-sm" />
-          </div>
-          <div>
-            <label className="block text-xs font-semibold text-[#2d3748]">To date</label>
-            <input type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} className="gov-input mt-1 bg-white px-3 py-2 text-sm" />
-          </div>
+    <div className="space-y-6">
+      <div className="flex items-center justify-between flex-wrap gap-4">
+        <div>
+          <h1 className="text-xl font-bold text-[#1a202c] uppercase tracking-tight">Revenue & Invoices</h1>
+          <p className="mt-1 text-sm text-[#4a5568]">Real-time revenue from backend — IP, OP and Service collections.</p>
         </div>
-      </div>
-
-      {/* Generate Invoice Manually - mandatory, auto-download */}
-      <div className="gov-card p-6">
-        <h2 className="text-lg font-bold text-[#1a202c] border-b border-[#cbd5e0] pb-2">Generate Invoice Manually <span className="text-red-600 text-sm font-normal">(Mandatory)</span></h2>
-        <p className="text-sm text-[#4a5568] mt-2">Create and download invoice with customer name, items and amount. Invoice is generated and downloaded automatically.</p>
-        <a href="/reception/invoices#manual" className="inline-flex items-center gov-btn-primary mt-4 px-5 py-2.5">
-          Open Generate Invoice →
-        </a>
-      </div>
-
-      {/* Download Report Section */}
-      <div className="gov-card p-6">
-        <h2 className="text-lg font-bold text-[#1a202c] border-b border-[#cbd5e0] pb-2">Download Report</h2>
-        <p className="text-sm text-[#4a5568] mt-2">Export revenue and payment records as CSV for the selected date range.</p>
-        <div className="flex flex-wrap items-end gap-4 mt-4">
-          <div>
-            <label className="block text-xs font-semibold text-[#2d3748]">Report type</label>
-            <select value={reportDownloadType} onChange={(e) => setReportDownloadType(e.target.value)} className="gov-select mt-1 bg-white px-3 py-2 text-sm">
-              <option value="summary">Summary + Hospital + Doctor</option>
-              <option value="hospital">Hospital-wise only</option>
-              <option value="doctor">Doctor-wise only</option>
-            </select>
-          </div>
-          <button type="button" onClick={downloadReport} className="gov-btn-primary px-5 py-2.5">
-            Download report (CSV)
+        <div className="flex gap-2">
+          <button onClick={downloadCSV} disabled={!revenue}
+            className="flex items-center gap-2 px-4 py-2 bg-white border border-[#cbd5e0] text-[#1a202c] rounded-sm text-sm font-medium hover:bg-[#f5f7fa] transition disabled:opacity-50">
+            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
+            Download CSV
+          </button>
+          <button onClick={fetchRevenue} className="flex items-center gap-2 px-4 py-2 bg-[#0d47a1] text-white rounded-sm text-sm font-medium hover:bg-[#0a3d91] transition">
+            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" /></svg>
+            Refresh
           </button>
         </div>
       </div>
 
-      {/* Hospital-wise Payment Record */}
-      <div className="gov-card overflow-hidden">
-        <div className="p-4 border-b border-[#cbd5e0] bg-[#f8fafc]">
-          <h2 className="font-semibold text-[#1a202c]">Hospital-wise Payment Record</h2>
-          <p className="text-sm text-[#4a5568]">Payments grouped by hospital for the selected date range.</p>
+      {/* Filters */}
+      <div className="bg-white border border-[#cbd5e0] rounded-sm p-4 flex flex-wrap gap-4 items-end shadow-sm">
+        <div>
+          <label className="block text-xs font-semibold text-[#2d3748] mb-1">From</label>
+          <input type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)}
+            className="border border-[#cbd5e0] rounded-sm px-3 py-2 text-sm focus:ring-2 focus:ring-[#0d47a1] outline-none" />
         </div>
-        <div className="overflow-x-auto">
-          <table className="gov-table">
-            <thead>
-              <tr>
-                <th>Hospital</th>
-                <th>Total (₹)</th>
-                <th>Count</th>
-              </tr>
-            </thead>
-            <tbody>
-              {Object.entries(byHospital).length === 0 ? (
-                <tr><td colSpan={3} className="text-center text-[#718096] py-8">No payment data for this range.</td></tr>
-              ) : (
-                Object.entries(byHospital).map(([id, v]) => (
-                  <tr key={id}>
-                    <td className="font-medium text-[#1a202c]">{getHospitalName(id)}</td>
-                    <td className="text-[#4a5568]">₹{v.total.toLocaleString("en-IN")}</td>
-                    <td className="text-[#4a5568]">{v.count}</td>
-                  </tr>
-                ))
-              )}
-            </tbody>
-          </table>
+        <div>
+          <label className="block text-xs font-semibold text-[#2d3748] mb-1">To</label>
+          <input type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)}
+            className="border border-[#cbd5e0] rounded-sm px-3 py-2 text-sm focus:ring-2 focus:ring-[#0d47a1] outline-none" />
         </div>
+        {hospitals.length > 0 && (
+          <div>
+            <label className="block text-xs font-semibold text-[#2d3748] mb-1">Hospital</label>
+            <select value={hospitalId} onChange={(e) => setHospitalId(e.target.value)}
+              className="border border-[#cbd5e0] rounded-sm px-3 py-2 text-sm min-w-48 focus:ring-2 focus:ring-[#0d47a1] outline-none">
+              <option value="">All hospitals</option>
+              {hospitals.map((h) => <option key={h._id} value={h._id}>{h.name}</option>)}
+            </select>
+          </div>
+        )}
       </div>
 
-      {/* Doctor-wise Payment Record */}
-      <div className="gov-card overflow-hidden">
-        <div className="p-4 border-b border-[#cbd5e0] bg-[#f8fafc]">
-          <h2 className="font-semibold text-[#1a202c]">Doctor-wise Payment Record</h2>
-          <p className="text-sm text-[#4a5568]">Payments grouped by doctor (from appointment booking) for the selected date range.</p>
-        </div>
-        <div className="overflow-x-auto">
-          <table className="gov-table">
-            <thead>
-              <tr>
-                <th>Doctor</th>
-                <th>Total (₹)</th>
-                <th>Count</th>
-              </tr>
-            </thead>
-            <tbody>
-              {Object.entries(byDoctor).length === 0 ? (
-                <tr><td colSpan={3} className="text-center text-[#718096] py-8">No payment data for this range.</td></tr>
-              ) : (
-                Object.entries(byDoctor).map(([id, v]) => (
-                  <tr key={id}>
-                    <td className="font-medium text-[#1a202c]">Dr. {getDoctorName(id)}</td>
-                    <td className="text-[#4a5568]">₹{v.total.toLocaleString("en-IN")}</td>
-                    <td className="text-[#4a5568]">{v.count}</td>
+      {loading ? <LoadingOverlay text="Loading revenue…" /> : !revenue ? (
+        <div className="bg-white border border-[#e2e8f0] rounded-sm p-10 text-center text-[#718096]">No revenue data available.</div>
+      ) : (
+        <>
+          {/* KPI cards */}
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+            {[
+              { label: "Total Billed",   value: revenue.totalBilled,   border: "border-blue-500",  text: "text-blue-700" },
+              { label: "Collected",      value: revenue.totalCollected, border: "border-green-500", text: "text-green-700" },
+              { label: "Outstanding",    value: revenue.totalPending,   border: "border-red-500",   text: "text-red-700" },
+              { label: "Total Bills",    value: revenue.billCount,      border: "border-gray-400",  text: "text-gray-700", count: true },
+            ].map((s) => (
+              <div key={s.label} className={`bg-white border-l-4 ${s.border} border border-[#e2e8f0] rounded-sm p-4 shadow-sm`}>
+                <p className="text-xs text-[#718096] uppercase tracking-wide">{s.label}</p>
+                <p className={`text-2xl font-bold mt-1 ${s.text}`}>
+                  {s.count ? s.value : `₹${(s.value || 0).toLocaleString("en-IN")}`}
+                </p>
+              </div>
+            ))}
+          </div>
+
+          {/* Tabs */}
+          <div className="flex gap-1 border-b border-[#e2e8f0]">
+            {tabs.map((t) => (
+              <button key={t.id} onClick={() => setActiveTab(t.id)}
+                className={`px-4 py-2 text-sm font-medium border-b-2 transition -mb-px ${activeTab === t.id ? "border-[#0d47a1] text-[#0d47a1]" : "border-transparent text-[#4a5568] hover:text-[#1a202c]"}`}>
+                {t.label}
+              </button>
+            ))}
+          </div>
+
+          {activeTab === "overview" && (
+            <div className="bg-white border border-[#e2e8f0] rounded-sm p-6 shadow-sm space-y-4">
+              <h2 className="font-semibold text-[#1a202c]">Collection Rate</h2>
+              <div className="flex items-center gap-4">
+                <div className="flex-1 bg-gray-200 rounded-full h-4">
+                  <div className="bg-green-500 h-4 rounded-full transition-all"
+                    style={{ width: `${revenue.totalBilled > 0 ? Math.min(100, (revenue.totalCollected / revenue.totalBilled) * 100) : 0}%` }} />
+                </div>
+                <span className="text-sm font-semibold text-[#1a202c]">
+                  {revenue.totalBilled > 0 ? ((revenue.totalCollected / revenue.totalBilled) * 100).toFixed(1) : 0}%
+                </span>
+              </div>
+              <p className="text-sm text-[#4a5568]">₹{(revenue.totalCollected || 0).toLocaleString("en-IN")} collected of ₹{(revenue.totalBilled || 0).toLocaleString("en-IN")} billed</p>
+              <div className="grid grid-cols-2 gap-4 text-sm pt-2">
+                <div>
+                  <p className="text-xs text-[#718096] uppercase mb-1">Date range</p>
+                  <p className="font-medium text-[#1a202c]">{dateFrom} → {dateTo}</p>
+                </div>
+                <div>
+                  <p className="text-xs text-[#718096] uppercase mb-1">Bills processed</p>
+                  <p className="font-medium text-[#1a202c]">{revenue.billCount || 0}</p>
+                </div>
+              </div>
+              <a href="/reception/invoices#manual"
+                className="inline-flex items-center gap-2 px-4 py-2 bg-[#0d47a1] text-white rounded-sm text-sm font-medium hover:bg-[#0a3d91] transition mt-2">
+                Generate Invoice →
+              </a>
+            </div>
+          )}
+
+          {activeTab === "by-type" && (
+            <div className="bg-white border border-[#e2e8f0] rounded-sm shadow-sm overflow-hidden">
+              <div className="p-4 border-b border-[#e2e8f0] bg-[#f8fafc]">
+                <h2 className="font-semibold text-[#1a202c]">Revenue by Bill Type (IP / OP / SERVICE)</h2>
+              </div>
+              <table className="w-full text-sm">
+                <thead className="bg-[#f8fafc] border-b border-[#e2e8f0]">
+                  <tr>
+                    {["Type", "Total Billed", "Collected", "Pending"].map((h) => (
+                      <th key={h} className="px-4 py-3 text-left text-xs font-semibold text-[#4a5568] uppercase">{h}</th>
+                    ))}
                   </tr>
-                ))
-              )}
-            </tbody>
-          </table>
-        </div>
-      </div>
+                </thead>
+                <tbody className="divide-y divide-[#e2e8f0]">
+                  {Object.entries(revenue.byType || {}).length === 0 ? (
+                    <tr><td colSpan={4} className="px-4 py-8 text-center text-[#718096]">No data</td></tr>
+                  ) : Object.entries(revenue.byType || {}).map(([type, v]) => (
+                    <tr key={type} className="hover:bg-[#f5f7fa]">
+                      <td className="px-4 py-3 font-semibold text-[#1a202c]">{type}</td>
+                      <td className="px-4 py-3 text-[#1a202c]">₹{(v.billed || 0).toLocaleString("en-IN")}</td>
+                      <td className="px-4 py-3 text-green-700">₹{(v.collected || 0).toLocaleString("en-IN")}</td>
+                      <td className="px-4 py-3 text-red-600">₹{((v.billed || 0) - (v.collected || 0)).toLocaleString("en-IN")}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+
+          {activeTab === "by-mode" && (
+            <div className="bg-white border border-[#e2e8f0] rounded-sm shadow-sm overflow-hidden">
+              <div className="p-4 border-b border-[#e2e8f0] bg-[#f8fafc]">
+                <h2 className="font-semibold text-[#1a202c]">Revenue by Payment Mode</h2>
+              </div>
+              <table className="w-full text-sm">
+                <thead className="bg-[#f8fafc] border-b border-[#e2e8f0]">
+                  <tr>
+                    {["Mode", "Amount Collected"].map((h) => (
+                      <th key={h} className="px-4 py-3 text-left text-xs font-semibold text-[#4a5568] uppercase">{h}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-[#e2e8f0]">
+                  {Object.entries(revenue.byMode || {}).length === 0 ? (
+                    <tr><td colSpan={2} className="px-4 py-8 text-center text-[#718096]">No data</td></tr>
+                  ) : Object.entries(revenue.byMode || {}).map(([mode, amt]) => (
+                    <tr key={mode} className="hover:bg-[#f5f7fa]">
+                      <td className="px-4 py-3 font-semibold text-[#1a202c]">{mode}</td>
+                      <td className="px-4 py-3 text-green-700 font-semibold">₹{Number(amt).toLocaleString("en-IN")}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+
+          {activeTab === "doctors" && (
+            <div className="bg-white border border-[#e2e8f0] rounded-sm shadow-sm overflow-hidden">
+              <div className="p-4 border-b border-[#e2e8f0] bg-[#f8fafc]">
+                <h2 className="font-semibold text-[#1a202c]">Doctor-wise Revenue</h2>
+              </div>
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead className="bg-[#f8fafc] border-b border-[#e2e8f0]">
+                    <tr>
+                      {["Doctor", "OP Count", "IP Count", "OP Revenue", "IP Revenue", "Total"].map((h) => (
+                        <th key={h} className="px-4 py-3 text-left text-xs font-semibold text-[#4a5568] uppercase">{h}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-[#e2e8f0]">
+                    {doctorRevenue.length === 0 ? (
+                      <tr><td colSpan={6} className="px-4 py-8 text-center text-[#718096]">No doctor revenue data</td></tr>
+                    ) : doctorRevenue.map((d, i) => (
+                      <tr key={i} className="hover:bg-[#f5f7fa]">
+                        <td className="px-4 py-3 font-semibold text-[#1a202c]">Dr. {d.doctorName || d.doctorId}</td>
+                        <td className="px-4 py-3 text-[#4a5568]">{d.opCount}</td>
+                        <td className="px-4 py-3 text-[#4a5568]">{d.ipCount}</td>
+                        <td className="px-4 py-3 text-blue-700">₹{(d.opRevenue || 0).toLocaleString("en-IN")}</td>
+                        <td className="px-4 py-3 text-red-700">₹{(d.ipRevenue || 0).toLocaleString("en-IN")}</td>
+                        <td className="px-4 py-3 font-bold text-green-700">₹{(d.totalRevenue || 0).toLocaleString("en-IN")}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+        </>
+      )}
     </div>
   );
 }

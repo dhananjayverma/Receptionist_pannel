@@ -42,10 +42,12 @@ export default function LoginPage() {
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data.message || "Login failed");
       if (typeof window !== "undefined") {
+        localStorage.setItem("token", data.token);
+        localStorage.setItem("user", JSON.stringify(data.user));
         localStorage.setItem("recption_token", data.token);
         localStorage.setItem("recption_user", JSON.stringify(data.user));
       }
-      router.push("/dashboard");
+      router.push("/reception/dashboard");
       router.refresh();
     } catch (err) {
       const msg = err.message || "Login failed";

@@ -39,6 +39,9 @@ export default function PatientsPage() {
   const [foundPatient, setFoundPatient] = useState(null);
   const [searching, setSearching] = useState(false);
   const [showAddModal, setShowAddModal] = useState(false);
+  const [editPatient, setEditPatient] = useState(null); // patient being edited
+  const [editForm, setEditForm] = useState({ name: "", age: "", gender: "", bloodGroup: "", address: "", phone: "" });
+  const [editSaving, setEditSaving] = useState(false);
   const [saving, setSaving] = useState(false);
   const [successModal, setSuccessModal] = useState({ open: false, title: "", message: "" });
   const [localDetails, setLocalDetails] = useState({});
@@ -183,6 +186,7 @@ export default function PatientsPage() {
       if (!res.ok) throw new Error(data.message || "Failed to add patient");
       const createdId = data.user?._id || data.user?.id || data._id || data.id;
       if (createdId) {
+        // Backend now saves and returns these fields; keep localStorage as fallback for older records
         const details = {
           age: data.user?.age ?? data.age ?? (form.age ? parseInt(form.age, 10) : undefined),
           gender: (data.user?.gender ?? data.gender ?? form.gender) || undefined,
@@ -192,6 +196,8 @@ export default function PatientsPage() {
           setLocalPatientDetails(createdId, details);
         }
       }
+      // Wait briefly so fetchPatients returns the freshly created record
+      await new Promise((r) => setTimeout(r, 300));
       setSuccessModal({ open: true, title: "Patient added", message: `Patient registered successfully. OPD: ${opdNumber}` });
       toast.success(`Patient added. OPD: ${opdNumber}`);
       setShowAddModal(false);
@@ -201,6 +207,58 @@ export default function PatientsPage() {
       toast.error(err.message || "Failed to add patient");
     } finally {
       setSaving(false);
+    }
+  }
+
+  function openEdit(p) {
+    const id = p._id || p.id;
+    const merged = { ...p, ...localDetails[id] };
+    const np = normalizePatient(merged);
+    setEditPatient(np);
+    setEditForm({
+      name: np.name || "",
+      age: np.age != null ? String(np.age) : "",
+      gender: np.gender || "",
+      bloodGroup: np.bloodGroup || "",
+      address: np.address || "",
+      phone: np.phone || np.mobile || "",
+    });
+  }
+
+  async function saveEdit(e) {
+    e.preventDefault();
+    if (!editPatient) return;
+    const id = editPatient._id || editPatient.id;
+    setEditSaving(true);
+    try {
+      const res = await fetch(buildApiUrl(`/api/users/${id}`), {
+        method: "PATCH",
+        headers: { ...getAuthHeaders(), "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: editForm.name || undefined,
+          phone: editForm.phone || undefined,
+          age: editForm.age ? parseInt(editForm.age, 10) : undefined,
+          gender: editForm.gender || undefined,
+          bloodGroup: editForm.bloodGroup || undefined,
+          address: editForm.address || undefined,
+        }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.message || "Failed to update patient");
+      // Also update localStorage as backup
+      setLocalPatientDetails(id, {
+        age: editForm.age ? parseInt(editForm.age, 10) : undefined,
+        gender: editForm.gender || undefined,
+        bloodGroup: editForm.bloodGroup || undefined,
+      });
+      toast.success("Patient updated successfully");
+      setEditPatient(null);
+      await new Promise((r) => setTimeout(r, 200));
+      fetchPatients();
+    } catch (err) {
+      toast.error(err.message || "Failed to update patient");
+    } finally {
+      setEditSaving(false);
     }
   }
 
@@ -262,12 +320,13 @@ export default function PatientsPage() {
                 <th>Age</th>
                 <th>Gender</th>
                 <th>Blood group</th>
+                <th>Address</th>
                 <th>OPD / ID</th>
                 <th>Actions</th>
               </tr>
             </thead>
             <tbody>
-              {loading ? <tr><td colSpan={8} className="text-center py-8"><div className="flex justify-center"><LoadingSpinner /></div><p className="mt-2 text-sm text-[#718096]">Loading patients…</p></td></tr> : filteredList.length === 0 ? <tr><td colSpan={8} className="text-center text-[#718096] py-8">No patients found.</td></tr> : filteredList.map((p) => {
+              {loading ? <tr><td colSpan={9} className="text-center py-8"><div className="flex justify-center"><LoadingSpinner /></div><p className="mt-2 text-sm text-[#718096]">Loading patients…</p></td></tr> : filteredList.length === 0 ? <tr><td colSpan={9} className="text-center text-[#718096] py-8">No patients found.</td></tr> : filteredList.map((p) => {
                 const id = p._id || p.id;
                 const merged = { ...p, ...localDetails[id] };
                 const np = normalizePatient(merged);
@@ -279,8 +338,10 @@ export default function PatientsPage() {
                   <td className="text-[#4a5568]">{np.age != null && np.age !== "" ? np.age : "—"}</td>
                   <td className="text-[#4a5568]">{np.gender || "—"}</td>
                   <td className="text-[#4a5568]">{np.bloodGroup || "—"}</td>
+                  <td className="text-[#4a5568] max-w-[160px] truncate" title={np.address || ""}>{np.address || "—"}</td>
                   <td className="text-[#718096] font-mono">{np.opdNumber || np._id || np.id}</td>
-                  <td>
+                  <td className="flex gap-1.5 items-center">
+                    <button type="button" onClick={() => openEdit(p)} className="text-xs px-2 py-1 bg-blue-50 text-blue-700 border border-blue-300 hover:bg-blue-100" title="Edit patient">Edit</button>
                     <button type="button" onClick={() => deletePatient(p._id || p.id)} className="text-xs px-2 py-1 bg-red-50 text-red-700 border border-red-300 hover:bg-red-100" title="Delete patient">Delete</button>
                   </td>
                 </tr>
@@ -347,6 +408,70 @@ export default function PatientsPage() {
               <div className="flex gap-3 pt-2">
                 <button type="button" onClick={() => setShowAddModal(false)} disabled={saving} className="flex-1 border border-[#cbd5e0] py-2.5 text-sm font-medium text-[#2d3748] bg-white hover:bg-[#f8fafc]">Cancel</button>
                 <button type="submit" disabled={saving} className="flex-1 gov-btn-primary py-2.5 disabled:opacity-50">{saving ? "Saving…" : "Add patient"}</button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Edit Patient Modal */}
+      {editPatient && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50" onClick={() => !editSaving && setEditPatient(null)}>
+          <div className="w-full max-w-md gov-card p-6 max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
+            <h2 className="text-base font-bold text-[#1a202c] border-b border-[#cbd5e0] pb-2">
+              Edit Patient — {editPatient.name}
+            </h2>
+            <p className="text-xs text-[#718096] mt-1 mb-4">OPD: {editPatient.opdNumber || editPatient._id}</p>
+            <form onSubmit={saveEdit} className="space-y-4">
+              <div>
+                <label className="block text-sm font-semibold text-[#2d3748]">Full name</label>
+                <input value={editForm.name} onChange={(e) => setEditForm((f) => ({ ...f, name: e.target.value }))}
+                  className="gov-input mt-1 w-full bg-white px-4 py-2 text-[#1a202c]" placeholder="Full name" />
+              </div>
+              <div>
+                <label className="block text-sm font-semibold text-[#2d3748]">Mobile</label>
+                <input type="tel" value={editForm.phone} onChange={(e) => setEditForm((f) => ({ ...f, phone: e.target.value }))}
+                  className="gov-input mt-1 w-full bg-white px-4 py-2 text-[#1a202c]" placeholder="9876543210" />
+              </div>
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-semibold text-[#2d3748]">Age</label>
+                  <input type="number" min="1" max="120" value={editForm.age}
+                    onChange={(e) => setEditForm((f) => ({ ...f, age: e.target.value }))}
+                    className="gov-input mt-1 w-full bg-white px-4 py-2 text-[#1a202c]" placeholder="25" />
+                </div>
+                <div>
+                  <label className="block text-sm font-semibold text-[#2d3748]">Gender</label>
+                  <select value={editForm.gender} onChange={(e) => setEditForm((f) => ({ ...f, gender: e.target.value }))}
+                    className="gov-select mt-1 w-full bg-white px-4 py-2 text-[#1a202c]">
+                    <option value="">Select</option>
+                    <option value="Male">Male</option>
+                    <option value="Female">Female</option>
+                    <option value="Other">Other</option>
+                  </select>
+                </div>
+              </div>
+              <div>
+                <label className="block text-sm font-semibold text-[#2d3748]">Blood group</label>
+                <select value={editForm.bloodGroup} onChange={(e) => setEditForm((f) => ({ ...f, bloodGroup: e.target.value }))}
+                  className="gov-select mt-1 w-full bg-white px-4 py-2 text-[#1a202c]">
+                  <option value="">—</option>
+                  {["A+", "A-", "B+", "B-", "O+", "O-", "AB+", "AB-"].map((b) => <option key={b} value={b}>{b}</option>)}
+                </select>
+              </div>
+              <div>
+                <label className="block text-sm font-semibold text-[#2d3748]">Address</label>
+                <textarea value={editForm.address} onChange={(e) => setEditForm((f) => ({ ...f, address: e.target.value }))}
+                  rows={2} className="gov-input mt-1 w-full bg-white px-4 py-2 text-[#1a202c]" placeholder="Address" />
+              </div>
+              <div className="flex gap-3 pt-2">
+                <button type="button" onClick={() => setEditPatient(null)} disabled={editSaving}
+                  className="flex-1 border border-[#cbd5e0] py-2.5 text-sm font-medium text-[#2d3748] bg-white hover:bg-[#f8fafc]">
+                  Cancel
+                </button>
+                <button type="submit" disabled={editSaving} className="flex-1 gov-btn-primary py-2.5 disabled:opacity-50">
+                  {editSaving ? "Saving…" : "Save changes"}
+                </button>
               </div>
             </form>
           </div>
